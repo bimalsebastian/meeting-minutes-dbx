@@ -47,6 +47,7 @@ pub mod openrouter;
 pub mod parakeet_engine;
 pub mod state;
 pub mod summary;
+pub mod meeting_detector;
 pub mod tray;
 pub mod utils;
 pub mod whisper_engine;
@@ -368,6 +369,36 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     }
 }
 
+// Secure storage (macOS Keychain / Windows Credential Manager / etc.)
+const SECURE_STORE_SERVICE: &str = "com.meetily.oauth";
+
+#[tauri::command]
+fn secure_store(key: String, value: String) -> Result<(), String> {
+    let entry = keyring::Entry::new(SECURE_STORE_SERVICE, &key)
+        .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
+    entry
+        .set_password(&value)
+        .map_err(|e| format!("Failed to store secret: {}", e))
+}
+
+#[tauri::command]
+fn secure_retrieve(key: String) -> Result<String, String> {
+    let entry = keyring::Entry::new(SECURE_STORE_SERVICE, &key)
+        .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
+    entry
+        .get_password()
+        .map_err(|e| format!("Failed to retrieve secret: {}", e))
+}
+
+#[tauri::command]
+fn secure_delete(key: String) -> Result<(), String> {
+    let entry = keyring::Entry::new(SECURE_STORE_SERVICE, &key)
+        .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
+    entry
+        .delete_password()
+        .map_err(|e| format!("Failed to delete secret: {}", e))
+}
+
 // Language preference commands
 #[tauri::command]
 async fn get_language_preference() -> Result<String, String> {
@@ -402,6 +433,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
@@ -661,6 +693,10 @@ pub fn run() {
             audio::recording_preferences::get_current_audio_backend,
             audio::recording_preferences::set_audio_backend,
             audio::recording_preferences::get_audio_backend_info,
+            // Secure storage (Keychain) commands
+            secure_store,
+            secure_retrieve,
+            secure_delete,
             // Language preference commands
             get_language_preference,
             set_language_preference,
@@ -710,6 +746,7 @@ pub fn run() {
             // System settings commands
             #[cfg(target_os = "macos")]
             utils::open_system_settings,
+            meeting_detector::get_active_window_title,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

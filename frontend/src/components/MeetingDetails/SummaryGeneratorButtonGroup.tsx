@@ -183,7 +183,7 @@ export function SummaryGeneratorButtonGroup({
       return;
     }
 
-    // Only check for Ollama provider
+    // Databricks and other non-Ollama providers: generate directly
     if (modelConfig.provider !== 'ollama') {
       onGenerateSummary(customPrompt);
       return;

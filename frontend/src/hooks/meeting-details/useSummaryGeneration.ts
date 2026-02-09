@@ -7,6 +7,8 @@ import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
+import { DatabricksOAuthClient, DatabricksLLMClient } from '@/lib/databricks-oauth';
+import { DatabricksAuthError } from '@/lib/databricks-llm-client';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -103,7 +105,55 @@ export function useSummaryGeneration({
         duration: 3000,
       });
 
-      // Process transcript and get process_id
+      // Databricks: call Model Serving in frontend (OAuth + fetch), then save summary
+      if (modelConfig.provider === 'databricks') {
+        const endpoint = (modelConfig.model || modelConfig.databricksEndpoint || '').trim();
+        if (!endpoint) {
+          throw new Error('Databricks serving endpoint name is required. Set it in Model Settings.');
+        }
+        try {
+          const [baseUrl, clientId, redirectUri] = await Promise.all([
+            invokeTauri<string>('secure_retrieve', { key: 'databricks_base_url' }),
+            invokeTauri<string>('secure_retrieve', { key: 'databricks_client_id' }),
+            invokeTauri<string>('secure_retrieve', { key: 'databricks_redirect_uri' }).catch(() => 'meetily://oauth/callback'),
+          ]);
+          if (!baseUrl?.trim() || !clientId?.trim()) {
+            throw new Error('Databricks workspace URL and Client ID are required. Configure them in Model Settings.');
+          }
+          const oauthClient = new DatabricksOAuthClient({
+            baseUrl: baseUrl.trim(),
+            clientId: clientId.trim(),
+            redirectUri: (redirectUri || 'meetily://oauth/callback').trim(),
+          });
+          const llmClient = new DatabricksLLMClient(oauthClient, endpoint);
+          setSummaryStatus('summarizing');
+          const markdown = await llmClient.generateSummary(transcriptText);
+          setAiSummary({ markdown } as Summary);
+          setSummaryStatus('completed');
+          await invokeTauri('api_save_meeting_summary', {
+            meetingId: meeting.id,
+            summary: { markdown },
+          });
+          toast.success('Summary generated successfully!', { description: 'Your meeting summary is ready', duration: 4000 });
+          if (onMeetingUpdated) await onMeetingUpdated();
+          await Analytics.trackSummaryGenerationCompleted(modelConfig.provider, modelConfig.model, true);
+          return;
+        } catch (err) {
+          if (err instanceof DatabricksAuthError) {
+            setSummaryError(err.message);
+            setSummaryStatus('error');
+            toast.error('Databricks sign-in required', {
+              description: err.message,
+              action: onOpenModelSettings ? { label: 'Settings', onClick: onOpenModelSettings } : undefined,
+            });
+            await Analytics.trackSummaryGenerationCompleted(modelConfig.provider, modelConfig.model, false, undefined, err.message);
+            return;
+          }
+          throw err;
+        }
+      }
+
+      // Process transcript and get process_id (all other providers)
       const result = await invokeTauri('api_process_transcript', {
         text: transcriptText,
         model: modelConfig.provider,
@@ -352,6 +402,7 @@ export function useSummaryGeneration({
     setAiSummary,
     updateMeetingTitle,
     onMeetingUpdated,
+    onOpenModelSettings,
   ]);
 
   // Helper function to fetch ALL transcripts for summary generation

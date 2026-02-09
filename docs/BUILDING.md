@@ -290,6 +290,10 @@ pnpm tauri:build
 
 The application will be built with Metal GPU acceleration automatically.
 
+### 3. DMG distribution and signing
+
+For creating a distributable DMG, pre-build validation, and code-signing/notarization (optional for development), see **[BUILD_DMG.md](BUILD_DMG.md)**.
+
 </details>
 
 <details>

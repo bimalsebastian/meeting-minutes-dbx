@@ -2,11 +2,19 @@
 
 import { useEffect, useState, useRef } from "react"
 import { Switch } from "./ui/switch"
-import { FolderOpen } from "lucide-react"
+import { Label } from "./ui/label"
+import { Input } from "./ui/input"
+import { FolderOpen, Calendar } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
+
+const CALENDAR_STORE_KEYS = {
+  enabled: 'calendar_auto_start_enabled',
+  refreshIntervalMinutes: 'calendar_refresh_interval_minutes',
+} as const
+const DEFAULT_REFRESH_INTERVAL_MINUTES = 5
 
 export function PreferenceSettings() {
   const {
@@ -22,12 +30,50 @@ export function PreferenceSettings() {
   const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
   const hasTrackedViewRef = useRef(false);
 
+  const [calendarAutoStartEnabled, setCalendarAutoStartEnabled] = useState<boolean>(false);
+  const [calendarRefreshIntervalMinutes, setCalendarRefreshIntervalMinutes] = useState<number>(DEFAULT_REFRESH_INTERVAL_MINUTES);
+  const [calendarSettingsLoaded, setCalendarSettingsLoaded] = useState(false);
+
   // Lazy load preferences on mount (only loads if not already cached)
   useEffect(() => {
     loadPreferences();
     // Reset tracking ref on mount (every tab visit)
     hasTrackedViewRef.current = false;
   }, [loadPreferences]);
+
+  // Load calendar auto-start settings from store
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const { Store } = await import('@tauri-apps/plugin-store');
+        const store = await Store.load('preferences.json');
+        const enabled = await store.get<boolean>(CALENDAR_STORE_KEYS.enabled);
+        const interval = await store.get<number>(CALENDAR_STORE_KEYS.refreshIntervalMinutes);
+        if (mounted) {
+          setCalendarAutoStartEnabled(enabled ?? false);
+          setCalendarRefreshIntervalMinutes(interval ?? DEFAULT_REFRESH_INTERVAL_MINUTES);
+          setCalendarSettingsLoaded(true);
+        }
+      } catch (e) {
+        console.error('Failed to load calendar settings:', e);
+        if (mounted) setCalendarSettingsLoaded(true);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  const saveCalendarSettings = async (enabled: boolean, intervalMinutes: number) => {
+    try {
+      const { Store } = await import('@tauri-apps/plugin-store');
+      const store = await Store.load('preferences.json');
+      await store.set(CALENDAR_STORE_KEYS.enabled, enabled);
+      await store.set(CALENDAR_STORE_KEYS.refreshIntervalMinutes, Math.max(1, Math.min(60, intervalMinutes)));
+      await store.save();
+    } catch (e) {
+      console.error('Failed to save calendar settings:', e);
+    }
+  };
 
   // Track preferences viewed analytics on every tab visit (once per mount)
   useEffect(() => {
@@ -157,6 +203,53 @@ export function PreferenceSettings() {
           </div>
           <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
         </div>
+      </div>
+
+      {/* Calendar auto-start Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div className="flex items-center gap-2 mb-2">
+          <Calendar className="w-5 h-5 text-gray-600" />
+          <h3 className="text-lg font-semibold text-gray-900">Calendar auto-start</h3>
+        </div>
+        <p className="text-sm text-gray-600 mb-4">
+          When enabled, Meetily checks Google Calendar for meetings in the next 10 minutes and can start recording when Zoom, Teams, or Meet is the active window.
+        </p>
+        {calendarSettingsLoaded && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="calendar-auto-start" className="text-sm font-medium">Enable auto-start</Label>
+              <Switch
+                id="calendar-auto-start"
+                checked={calendarAutoStartEnabled}
+                onCheckedChange={async (checked) => {
+                  setCalendarAutoStartEnabled(checked);
+                  await saveCalendarSettings(checked, calendarRefreshIntervalMinutes);
+                }}
+              />
+            </div>
+            <div>
+              <Label htmlFor="calendar-refresh-interval" className="text-sm font-medium">Check every (minutes)</Label>
+              <Input
+                id="calendar-refresh-interval"
+                type="number"
+                min={1}
+                max={60}
+                value={calendarRefreshIntervalMinutes}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (!Number.isNaN(v)) setCalendarRefreshIntervalMinutes(v);
+                }}
+                onBlur={async () => {
+                  const v = Math.max(1, Math.min(60, calendarRefreshIntervalMinutes));
+                  setCalendarRefreshIntervalMinutes(v);
+                  await saveCalendarSettings(calendarAutoStartEnabled, v);
+                }}
+                className="mt-1 w-20"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Poll calendar every 1–60 minutes (default 5).</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Data Storage Locations Section */}

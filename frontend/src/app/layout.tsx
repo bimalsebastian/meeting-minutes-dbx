@@ -21,6 +21,7 @@ import { OnboardingFlow } from '@/components/onboarding'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
 import { UpdateCheckProvider } from '@/components/UpdateCheckProvider'
 import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcessingProvider'
+import { useOAuthCallbackInit, useCalendarAutoStart } from '@/App'
 
 const sourceSans3 = Source_Sans_3({
   subsets: ['latin'],
@@ -68,6 +69,9 @@ export default function RootLayout({
       return () => document.removeEventListener('contextmenu', handleContextMenu);
     }
   }, []);
+  useOAuthCallbackInit()
+  useCalendarAutoStart()
+
   useEffect(() => {
     // Listen for tray recording toggle request
     const unlisten = listen('request-recording-toggle', () => {

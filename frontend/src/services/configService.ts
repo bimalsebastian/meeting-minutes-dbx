@@ -9,7 +9,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 
 export interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai' | 'builtin-ai' | 'custom-openai';
+  provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai' | 'builtin-ai' | 'custom-openai' | 'databricks';
   model: string;
   whisperModel: string;
   apiKey?: string | null;
@@ -21,6 +21,8 @@ export interface ModelConfig {
   maxTokens?: number | null;
   temperature?: number | null;
   topP?: number | null;
+  // Databricks (only populated when provider is 'databricks'); OAuth config in secure storage
+  databricksEndpoint?: string | null;
 }
 
 export interface CustomOpenAIConfig {

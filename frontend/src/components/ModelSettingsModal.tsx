@@ -20,9 +20,10 @@ import { Switch } from '@/components/ui/switch';
 import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp, Download, ExternalLink } from 'lucide-react';
 import { cn, isOllamaNotInstalledError } from '@/lib/utils';
 import { toast } from 'sonner';
+import { DatabricksOAuthSettings } from '@/components/DatabricksOAuthSettings';
 
 export interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai';
+  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai' | 'databricks';
   model: string;
   whisperModel: string;
   apiKey?: string | null;
@@ -34,6 +35,8 @@ export interface ModelConfig {
   maxTokens?: number | null;
   temperature?: number | null;
   topP?: number | null;
+  // Databricks: model is endpoint name; OAuth config in secure storage
+  databricksEndpoint?: string | null;
 }
 
 interface OllamaModel {
@@ -197,6 +200,7 @@ export function ModelSettingsModal({
     openrouter: openRouterModels.map((m) => m.id),
     'builtin-ai': builtinAiModels.map((m) => m.name),
     'custom-openai': customOpenAIModel ? [customOpenAIModel] : [], // User specifies model manually
+    databricks: modelConfig.provider === 'databricks' && modelConfig.model ? [modelConfig.model] : [],
   };
 
   const requiresApiKey =
@@ -215,10 +219,13 @@ export function ModelSettingsModal({
     !customOpenAIModel.trim()
   );
 
+  const isDatabricksInvalid = modelConfig.provider === 'databricks' && !modelConfig.model?.trim();
+
   const isDoneDisabled =
     (requiresApiKey && (!apiKey || (typeof apiKey === 'string' && !apiKey.trim()))) ||
     (modelConfig.provider === 'ollama' && ollamaEndpointChanged) ||
-    isCustomOpenAIInvalid;
+    isCustomOpenAIInvalid ||
+    isDatabricksInvalid;
 
   useEffect(() => {
     const fetchModelConfig = async () => {
@@ -709,6 +716,9 @@ export function ModelSettingsModal({
                     console.error('Failed to load custom OpenAI config:', err);
                   });
                 }
+                if (provider === 'databricks') {
+                  setModelConfig((prev) => ({ ...prev, provider, model: prev.model || '' }));
+                }
               }}
             >
               <SelectTrigger>
@@ -722,10 +732,11 @@ export function ModelSettingsModal({
                 <SelectItem value="ollama">Ollama</SelectItem>
                 <SelectItem value="openai">OpenAI</SelectItem>
                 <SelectItem value="openrouter">OpenRouter</SelectItem>
+                <SelectItem value="databricks">Databricks</SelectItem>
               </SelectContent>
             </Select>
 
-            {modelConfig.provider !== 'builtin-ai' && modelConfig.provider !== 'custom-openai' && (
+            {modelConfig.provider !== 'builtin-ai' && modelConfig.provider !== 'custom-openai' && modelConfig.provider !== 'databricks' && (
               <Select
                 value={modelConfig.model}
                 onValueChange={(value) =>
@@ -752,6 +763,14 @@ export function ModelSettingsModal({
             )}
           </div>
         </div>
+
+        {/* Databricks OAuth & endpoint */}
+        {modelConfig.provider === 'databricks' && (
+          <DatabricksOAuthSettings
+            endpoint={modelConfig.model}
+            onEndpointChange={(endpoint) => setModelConfig((prev) => ({ ...prev, model: endpoint }))}
+          />
+        )}
 
         {/* Custom OpenAI Configuration Section */}
         {modelConfig.provider === 'custom-openai' && (
