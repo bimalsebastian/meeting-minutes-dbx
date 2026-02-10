@@ -7,8 +7,7 @@ import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
-import { DatabricksOAuthClient, DatabricksLLMClient } from '@/lib/databricks-oauth';
-import { DatabricksAuthError } from '@/lib/databricks-llm-client';
+import { DatabricksAzureClient, DatabricksAuthError } from '@/lib/databricks-azure-client';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -105,30 +104,21 @@ export function useSummaryGeneration({
         duration: 3000,
       });
 
-      // Databricks: call Model Serving in frontend (OAuth + fetch), then save summary
+      // Databricks: Azure CLI auth + Model Serving
       if (modelConfig.provider === 'databricks') {
         const endpoint = (modelConfig.model || modelConfig.databricksEndpoint || '').trim();
         if (!endpoint) {
           throw new Error('Databricks serving endpoint name is required. Set it in Model Settings.');
         }
         try {
-          const [baseUrl, clientId, redirectUri] = await Promise.all([
-            invokeTauri<string>('secure_retrieve', { key: 'databricks_base_url' }),
-            invokeTauri<string>('secure_retrieve', { key: 'databricks_client_id' }),
-            invokeTauri<string>('secure_retrieve', { key: 'databricks_redirect_uri' }).catch(() => 'meetily://oauth/callback'),
-          ]);
-          if (!baseUrl?.trim() || !clientId?.trim()) {
-            throw new Error('Databricks workspace URL and Client ID are required. Configure them in Model Settings.');
+          const baseUrl = await invokeTauri<string>('secure_retrieve', { key: 'databricks_base_url' });
+          if (!baseUrl?.trim()) {
+            throw new Error('Databricks workspace URL is required. Configure it in Model Settings.');
           }
-          const oauthClient = new DatabricksOAuthClient({
-            baseUrl: baseUrl.trim(),
-            clientId: clientId.trim(),
-            redirectUri: (redirectUri || 'meetily://oauth/callback').trim(),
-          });
-          const llmClient = new DatabricksLLMClient(oauthClient, endpoint);
+          const llmClient = new DatabricksAzureClient(baseUrl.trim(), endpoint);
           setSummaryStatus('summarizing');
           const markdown = await llmClient.generateSummary(transcriptText);
-          setAiSummary({ markdown } as Summary);
+          setAiSummary({ markdown } as unknown as Summary);
           setSummaryStatus('completed');
           await invokeTauri('api_save_meeting_summary', {
             meetingId: meeting.id,

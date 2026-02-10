@@ -39,9 +39,7 @@ if (!fs.existsSync(tauriConfPath)) {
     } else {
       ok('Bundle identifier: ' + conf.identifier);
     }
-    if (!conf.plugins?.['deep-link']?.desktop?.schemes?.includes('meetily')) {
-      warn('URL scheme "meetily" should be registered under plugins.deep-link.desktop.schemes');
-    } else {
+    if (conf.plugins?.['deep-link']?.desktop?.schemes?.includes('meetily')) {
       ok('URL scheme meetily registered');
     }
     if (!conf.bundle?.targets?.includes('dmg')) {

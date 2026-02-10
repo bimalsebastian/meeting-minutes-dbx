@@ -29,6 +29,7 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
           console.log('✅ Loaded model config from database:', {
             provider: data.provider,
             model: data.model,
+            note: data.provider === 'databricks' ? '(model = serving endpoint name)' : undefined,
             whisperModel: data.whisperModel,
             hasApiKey: !!data.apiKey,
             ollamaEndpoint: data.ollamaEndpoint || 'default'
@@ -116,7 +117,11 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
         apiKey: configToSave.apiKey ?? null,
         ollamaEndpoint: configToSave.ollamaEndpoint ?? null
       };
-      console.log('Saving model config with payload:', payload);
+      console.log('Saving model config:', {
+        provider: payload.provider,
+        model: payload.model,
+        note: payload.provider === 'databricks' ? '(model = serving endpoint name)' : undefined,
+      });
 
       // Track model configuration change
       if (updatedConfig && (
@@ -132,11 +137,13 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
       }
 
       await invokeTauri('api_save_model_config', {
-        provider: payload.provider,
-        model: payload.model,
-        whisperModel: payload.whisperModel,
-        apiKey: payload.apiKey,
-        ollamaEndpoint: payload.ollamaEndpoint,
+        args: {
+          provider: payload.provider,
+          model: payload.model,
+          whisperModel: payload.whisperModel,
+          apiKey: payload.apiKey,
+          ollamaEndpoint: payload.ollamaEndpoint,
+        },
       });
 
       console.log('Save model config success');

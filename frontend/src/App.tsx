@@ -4,29 +4,12 @@ import { useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 
 /**
- * Initializes OAuth deep-link callback handling for meetily:// URLs.
- * Call this from the root layout (or render <App /> once at the root).
- * Only runs when running inside Tauri and when Databricks env vars are set.
+ * Databricks now uses the device code flow (no redirect/callback).
+ * OAuth deep-link callback (meetily://) is no longer used for Databricks.
+ * This hook is kept for potential future use (e.g. other OAuth providers).
  */
 export function useOAuthCallbackInit() {
-  useEffect(() => {
-    if (typeof window === 'undefined' || !(window as unknown as { __TAURI__?: unknown }).__TAURI__) return
-    const baseUrl = process.env.NEXT_PUBLIC_DATABRICKS_BASE_URL
-    const clientId = process.env.NEXT_PUBLIC_DATABRICKS_CLIENT_ID
-    const redirectUri = process.env.NEXT_PUBLIC_DATABRICKS_REDIRECT_URI || 'meetily://oauth/callback'
-    if (!baseUrl || !clientId) return
-    let unlisten: (() => void) | null = null
-    void import('@/lib/databricks-oauth')
-      .then(({ DatabricksOAuthClient }) =>
-        import('@/lib/oauth-callback-handler').then(({ initOAuthCallbackHandler }) => {
-          const client = new DatabricksOAuthClient({ baseUrl, clientId, redirectUri })
-          return initOAuthCallbackHandler(client)
-        })
-      )
-      .then((fn) => { unlisten = fn })
-      .catch((err) => { console.debug('[App] OAuth callback handler not available:', err) })
-    return () => { unlisten?.() }
-  }, [])
+  // No-op: Databricks uses device code flow; no callback handler needed.
 }
 
 const CALENDAR_STORE_KEYS = {

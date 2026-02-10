@@ -182,11 +182,13 @@ const Sidebar: React.FC = () => {
   const handleSaveModelConfig = async (config: ModelConfig) => {
     try {
       await invoke('api_save_model_config', {
-        provider: config.provider,
-        model: config.model,
-        whisperModel: config.whisperModel,
-        apiKey: config.apiKey,
-        ollamaEndpoint: config.ollamaEndpoint,
+        args: {
+          provider: config.provider,
+          model: config.model,
+          whisperModel: config.whisperModel,
+          apiKey: config.apiKey,
+          ollamaEndpoint: config.ollamaEndpoint,
+        },
       });
 
       setModelConfig(config);

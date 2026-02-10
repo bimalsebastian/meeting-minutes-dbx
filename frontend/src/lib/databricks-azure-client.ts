@@ -1,15 +1,18 @@
 /**
- * Databricks Model Serving LLM client for summary generation.
- * Uses OAuth for auth and POST /serving-endpoints/{endpoint}/invocations.
+ * Databricks Model Serving client using Azure CLI authentication.
+ * Token is obtained via invoke('get_databricks_token') and stored in keychain.
+ * Auto-refreshes on 401 by calling get_databricks_token again.
  */
 
-import type { DatabricksOAuthClient } from './databricks-oauth';
+import { invoke } from '@tauri-apps/api/core';
+
+const STORAGE_KEY_TOKEN = 'databricks_token';
 
 /** Thrown when the API returns 401; caller should prompt re-authentication. */
 export class DatabricksAuthError extends Error {
   readonly status = 401;
 
-  constructor(message: string = 'Databricks authentication expired or invalid. Please sign in again.') {
+  constructor(message: string = 'Databricks authentication expired or invalid. Sign in again via Azure CLI.') {
     super(message);
     this.name = 'DatabricksAuthError';
     Object.setPrototypeOf(this, DatabricksAuthError.prototype);
@@ -33,26 +36,39 @@ export class DatabricksApiError extends Error {
 const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant that summarizes meeting transcripts. Produce a clear, concise summary with key points and action items when relevant.';
 
 /**
- * LLM client for Databricks Model Serving (chat endpoint).
- * Uses the OAuth client to obtain a valid token before each request.
+ * LLM client for Databricks Model Serving (chat endpoint) using Azure CLI token.
  */
-export class DatabricksLLMClient {
-  private readonly oauthClient: DatabricksOAuthClient;
-  private readonly endpoint: string;
+export class DatabricksAzureClient {
   private readonly baseUrl: string;
+  private readonly endpoint: string;
 
-  constructor(oauthClient: DatabricksOAuthClient, endpoint: string) {
-    this.oauthClient = oauthClient;
+  constructor(baseUrl: string, endpoint: string) {
+    this.baseUrl = baseUrl.replace(/\/$/, '');
     this.endpoint = endpoint;
-    this.baseUrl = oauthClient.getBaseUrl().replace(/\/$/, '');
+  }
+
+  /** Get a valid access token (from keychain if stored, otherwise via get_databricks_token). */
+  async getValidAccessToken(): Promise<string> {
+    const stored = await invoke<string>('secure_retrieve', { key: STORAGE_KEY_TOKEN }).catch(() => '');
+    if (stored?.trim()) {
+      return stored.trim();
+    }
+    const token = await invoke<string>('get_databricks_token').catch((e) => {
+      throw new DatabricksAuthError(String(e));
+    });
+    if (!token?.trim()) {
+      throw new DatabricksAuthError('No token. Sign in via Azure CLI in Settings.');
+    }
+    await invoke('secure_store', { key: STORAGE_KEY_TOKEN, value: token.trim() });
+    return token.trim();
   }
 
   /**
-   * Generate a summary from a meeting transcript using the configured serving endpoint.
-   * Calls getValidAccessToken() before the request. On 401 throws DatabricksAuthError for re-auth.
+   * Generate a summary from a meeting transcript.
+   * On 401, re-fetches token via get_databricks_token and retries once.
    */
   async generateSummary(transcript: string): Promise<string> {
-    const token = await this.oauthClient.getValidAccessToken();
+    let token = await this.getValidAccessToken();
     const url = `${this.baseUrl}/serving-endpoints/${encodeURIComponent(this.endpoint)}/invocations`;
 
     const body = {
@@ -63,19 +79,32 @@ export class DatabricksLLMClient {
       max_tokens: 2000,
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(body),
-    });
+    const doRequest = (t: string) =>
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${t}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+    let response = await doRequest(token);
 
     if (response.status === 401) {
-      throw new DatabricksAuthError(
-        'Databricks authentication expired or invalid. Please sign in again.'
-      );
+      const freshToken = await invoke<string>('get_databricks_token').catch((e) => {
+        throw new DatabricksAuthError(String(e));
+      });
+      if (freshToken?.trim()) {
+        await invoke('secure_store', { key: STORAGE_KEY_TOKEN, value: freshToken.trim() });
+        token = freshToken.trim();
+      }
+      response = await doRequest(token);
+      if (response.status === 401) {
+        throw new DatabricksAuthError(
+          'Databricks authentication expired or invalid. Sign in again via Azure CLI.'
+        );
+      }
     }
 
     const text = await response.text();
@@ -98,37 +127,26 @@ export class DatabricksLLMClient {
     return this.extractSummaryFromResponse(data);
   }
 
-  /**
-   * Extract summary text from Databricks chat completion response.
-   * Supports choices[].message.content (chat) and choices[].text (completions).
-   */
   private extractSummaryFromResponse(data: unknown): string {
     if (data === null || typeof data !== 'object') {
       throw new DatabricksApiError('Empty or invalid response from model', 200);
     }
-
     const obj = data as Record<string, unknown>;
     const choices = obj?.choices;
     if (!Array.isArray(choices) || choices.length === 0) {
       throw new DatabricksApiError('Response missing choices', 200);
     }
-
     const first = choices[0] as Record<string, unknown> | undefined;
     if (!first) {
       throw new DatabricksApiError('Invalid choices in response', 200);
     }
-
-    // Chat: message.content
     const message = first.message as { content?: string } | undefined;
     if (message && typeof message.content === 'string') {
       return message.content.trim();
     }
-
-    // Completions: text
     if (typeof first.text === 'string') {
       return first.text.trim();
     }
-
     throw new DatabricksApiError('Response missing summary content', 200);
   }
 }

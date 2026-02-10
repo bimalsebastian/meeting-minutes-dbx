@@ -34,9 +34,10 @@ pub(crate) use perf_trace;
 
 // Re-export async logging macros for external use (removed due to macro conflicts)
 
-// Declare audio module
+// Declare modules
 pub mod analytics;
 pub mod api;
+pub mod auth;
 pub mod audio;
 pub mod console_utils;
 pub mod database;
@@ -661,6 +662,12 @@ pub fn run() {
             api::test_backend_connection,
             api::debug_backend_connection,
             api::open_external_url,
+            // Azure CLI auth for Databricks
+            auth::azure_cli::check_azure_cli_installed,
+            auth::azure_cli::check_azure_logged_in,
+            auth::azure_cli::do_azure_login,
+            auth::azure_cli::get_databricks_token,
+            auth::azure_cli::refresh_databricks_token,
             // Custom OpenAI commands
             api::api_save_custom_openai_config,
             api::api_get_custom_openai_config,

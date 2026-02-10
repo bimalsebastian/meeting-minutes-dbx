@@ -20,7 +20,7 @@ import { Switch } from '@/components/ui/switch';
 import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp, Download, ExternalLink } from 'lucide-react';
 import { cn, isOllamaNotInstalledError } from '@/lib/utils';
 import { toast } from 'sonner';
-import { DatabricksOAuthSettings } from '@/components/DatabricksOAuthSettings';
+import { AzureCliAuth } from '@/components/AzureCliAuth';
 
 export interface ModelConfig {
   provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai' | 'databricks';
@@ -103,6 +103,10 @@ export function ModelSettingsModal({
   const [customTopP, setCustomTopP] = useState<string>(modelConfig.topP?.toString() || '');
   const [isCustomOpenAIAdvancedOpen, setIsCustomOpenAIAdvancedOpen] = useState<boolean>(false);
   const [isTestingConnection, setIsTestingConnection] = useState<boolean>(false);
+
+  // Databricks: workspace URL lifted so modal Save can persist it (same as endpoint via model config)
+  const [databricksBaseUrl, setDatabricksBaseUrl] = useState<string>('');
+  const prevProviderRef = useRef<string | null>(null);
 
   // Use global download context instead of local state
   const { isDownloading, getProgress, downloadingModels } = useOllamaDownload();
@@ -342,6 +346,16 @@ export function ModelSettingsModal({
     modelConfig.topP
   ]);
 
+  // Load Databricks workspace URL from keychain when switching to databricks so one Save persists both
+  useEffect(() => {
+    if (modelConfig.provider === 'databricks' && prevProviderRef.current !== 'databricks') {
+      invoke<string>('secure_retrieve', { key: 'databricks_base_url' })
+        .then((url) => setDatabricksBaseUrl(url || ''))
+        .catch(() => setDatabricksBaseUrl(''));
+    }
+    prevProviderRef.current = modelConfig.provider;
+  }, [modelConfig.provider]);
+
   // Reset hasAutoFetched flag and clear models when switching away from Ollama
   useEffect(() => {
     if (modelConfig.provider !== 'ollama') {
@@ -523,6 +537,16 @@ export function ModelSettingsModal({
     };
     setModelConfig(updatedConfig);
     console.log('ModelSettingsModal - handleSave - Updated ModelConfig:', updatedConfig);
+
+    // Persist Databricks workspace URL with the same Save so both endpoint and URL persist
+    if (modelConfig.provider === 'databricks' && databricksBaseUrl?.trim()) {
+      try {
+        await invoke('secure_store', { key: 'databricks_base_url', value: databricksBaseUrl.trim() });
+      } catch (e) {
+        console.error('Failed to save Databricks workspace URL:', e);
+        toast.error('Failed to save workspace URL');
+      }
+    }
 
     onSave(updatedConfig);
   };
@@ -764,11 +788,13 @@ export function ModelSettingsModal({
           </div>
         </div>
 
-        {/* Databricks OAuth & endpoint */}
+        {/* Databricks: workspace URL + Azure CLI auth */}
         {modelConfig.provider === 'databricks' && (
-          <DatabricksOAuthSettings
+          <AzureCliAuth
             endpoint={modelConfig.model}
             onEndpointChange={(endpoint) => setModelConfig((prev) => ({ ...prev, model: endpoint }))}
+            baseUrl={databricksBaseUrl}
+            onBaseUrlChange={setDatabricksBaseUrl}
           />
         )}
 

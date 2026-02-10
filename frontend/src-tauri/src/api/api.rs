@@ -1,7 +1,7 @@
 use log::{debug as log_debug, error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
 
 use crate::{
@@ -476,7 +476,7 @@ pub async fn api_get_model_config<R: Runtime>(
     match SettingsRepository::get_model_config(pool).await {
         Ok(Some(config)) => {
             log_info!(
-                "✅ Found model config in database: provider={}, model={}, whisperModel={}, ollamaEndpoint={:?}",
+                "✅ api_get_model_config: provider='{}' model='{}' (for databricks this is serving endpoint name) whisperModel='{}' ollamaEndpoint={:?}",
                 &config.provider,
                 &config.model,
                 &config.whisper_model,
@@ -514,44 +514,60 @@ pub async fn api_get_model_config<R: Runtime>(
     }
 }
 
+/// Args for api_save_model_config. Accepts camelCase from frontend (apiKey, whisperModel, ollamaEndpoint).
+#[derive(serde::Deserialize)]
+pub struct SaveModelConfigArgs {
+    pub provider: String,
+    pub model: String,
+    #[serde(alias = "whisperModel")]
+    pub whisper_model: String,
+    #[serde(alias = "apiKey")]
+    pub api_key: Option<String>,
+    #[serde(alias = "ollamaEndpoint")]
+    pub ollama_endpoint: Option<String>,
+}
+
 #[tauri::command]
 pub async fn api_save_model_config<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
-    provider: String,
-    model: String,
-    whisper_model: String,
-    api_key: Option<String>,
-    ollama_endpoint: Option<String>,
-    _auth_token: Option<String>,
+    args: SaveModelConfigArgs,
 ) -> Result<serde_json::Value, String> {
+    let provider = &args.provider;
+    let model = &args.model;
+    let whisper_model = &args.whisper_model;
+    let api_key = &args.api_key;
+    let ollama_endpoint = args.ollama_endpoint.as_deref();
+
     log_info!(
-        "💾 api_save_model_config called (native): provider='{}', model='{}', whisperModel='{}', ollamaEndpoint={:?}",
-        &provider,
-        &model,
-        &whisper_model,
-        &ollama_endpoint
+        "💾 api_save_model_config called: provider='{}' model='{}' (for databricks this is serving endpoint name) whisperModel='{}' ollamaEndpoint={:?} api_key_len={}",
+        provider,
+        model,
+        whisper_model,
+        ollama_endpoint,
+        api_key.as_ref().map_or(0, |k| k.len())
     );
     let pool = state.db_manager.pool();
 
     if let Err(e) = SettingsRepository::save_model_config(
         pool,
-        &provider,
-        &model,
-        &whisper_model,
-        ollama_endpoint.as_deref(),
+        provider,
+        model,
+        whisper_model,
+        ollama_endpoint,
     )
     .await
     {
-        log_error!("❌ Failed to save model config to database: {}", e);
+        log_error!("❌ api_save_model_config: failed to write to database: {}", e);
         return Err(e.to_string());
     }
+    log_info!("✅ api_save_model_config: wrote to database (provider={}, model={})", provider, model);
 
     // Skip API key saving for custom-openai provider (it uses customOpenAIConfig JSON instead)
     if let Some(key) = api_key {
         if !key.is_empty() && provider != "custom-openai" {
             log_info!("🔑 API key provided, saving...");
-            if let Err(e) = SettingsRepository::save_api_key(pool, &provider, &key).await {
+            if let Err(e) = SettingsRepository::save_api_key(pool, provider, key).await {
                 log_error!("❌ Failed to save API key: {}", e);
                 return Err(e.to_string());
             }

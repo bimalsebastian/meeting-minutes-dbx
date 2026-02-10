@@ -244,13 +244,25 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
             }
           }
 
-          // For non-custom-openai providers, just set base config
-          setModelConfig(prev => ({
-            ...prev,
-            provider: data.provider,
-            model: data.model || prev.model,
-            whisperModel: data.whisperModel || prev.whisperModel,
-          }));
+          // For non-custom-openai providers, just set base config.
+          // For databricks, never use prev.model fallback (it may be ollama default); use API model as-is so serving endpoint name persists.
+          setModelConfig(prev => {
+            const modelValue = data.provider === 'databricks'
+              ? (data.model ?? '')
+              : (data.model || prev.model);
+            console.log('[ConfigContext] Loaded model config:', {
+              provider: data.provider,
+              model: modelValue,
+              fromApi: data.model,
+              note: data.provider === 'databricks' ? '(model = serving endpoint name)' : undefined,
+            });
+            return {
+              ...prev,
+              provider: data.provider,
+              model: modelValue,
+              whisperModel: data.whisperModel || prev.whisperModel,
+            };
+          });
         }
       } catch (error) {
         console.error('Failed to fetch saved model config in ConfigContext:', error);
@@ -324,7 +336,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     'builtin-ai': [],
     'custom-openai': [],
-    databricks: [], // Endpoint name set in DatabricksOAuthSettings
+    databricks: [], // Endpoint name set in Azure CLI auth (Model Settings)
   };
 
   // Toggle confidence indicator with localStorage persistence

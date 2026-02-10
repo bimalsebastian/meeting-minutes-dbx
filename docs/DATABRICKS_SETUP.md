@@ -220,6 +220,16 @@ NEXT_PUBLIC_GOOGLE_CALENDAR_REDIRECT_URI=meetily://oauth/google/callback
 
 ## 6. Troubleshooting
 
+### “Sign-in failed” or “Load failed” when clicking **Sign in to Databricks**
+
+- **Cause:** Often the first request to your Databricks workspace is blocked (e.g. by the app’s security policy) or the workspace URL has a multi-level subdomain (e.g. Azure `adb-xxx.11.azuredatabricks.net`) that wasn’t allowed.
+- **Fix:** Ensure **Workspace URL** is correct and saved (e.g. `https://adb-984752964297111.11.azuredatabricks.net` for Azure — no trailing space). Rebuild the app so the latest CSP and logging are included, then try again.
+- **Log file (after a failed sign-in):** The app writes Databricks OAuth logs so you can investigate after the fact:
+  - **macOS:** `~/Library/Application Support/com.meetily.ai/logs/databricks-oauth.log`
+  - **Windows:** `%APPDATA%\com.meetily.ai\logs\databricks-oauth.log`
+  - **Linux:** `~/.local/share/com.meetily.ai/logs/databricks-oauth.log`  
+  Open this file after reproducing the error; it will contain timestamps, the request URL, and any error (e.g. “fetch failed”, “Load failed”, or a Databricks error).
+
 ### “State mismatch” or “Possible CSRF” when signing in to Databricks
 
 - **Cause:** The `state` parameter in the OAuth callback doesn’t match what Meetily stored (e.g. you opened the link twice or in another tab).

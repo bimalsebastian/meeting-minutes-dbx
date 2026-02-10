@@ -96,11 +96,13 @@ function MeetingDetailsContent() {
         console.log('💾 DB empty, using gemma3:1b as initial default');
 
         await invoke('api_save_model_config', {
-          provider: 'ollama',
-          model: '',
-          whisperModel: 'large-v3',
-          apiKey: null,
-          ollamaEndpoint: null,
+          args: {
+            provider: 'ollama',
+            model: '',
+            whisperModel: 'large-v3',
+            apiKey: null,
+            ollamaEndpoint: null,
+          },
         });
 
         setShouldAutoGenerate(true);
