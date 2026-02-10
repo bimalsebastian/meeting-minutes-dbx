@@ -668,6 +668,7 @@ pub fn run() {
             auth::azure_cli::do_azure_login,
             auth::azure_cli::get_databricks_token,
             auth::azure_cli::refresh_databricks_token,
+            auth::databricks_summary::databricks_generate_summary,
             // Custom OpenAI commands
             api::api_save_custom_openai_config,
             api::api_get_custom_openai_config,

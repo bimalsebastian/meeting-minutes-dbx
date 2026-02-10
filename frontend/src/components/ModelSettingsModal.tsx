@@ -349,9 +349,19 @@ export function ModelSettingsModal({
   // Load Databricks workspace URL from keychain when switching to databricks so one Save persists both
   useEffect(() => {
     if (modelConfig.provider === 'databricks' && prevProviderRef.current !== 'databricks') {
+      console.log('[Settings] Loading Databricks workspace URL from keychain (key: databricks_base_url)...');
       invoke<string>('secure_retrieve', { key: 'databricks_base_url' })
-        .then((url) => setDatabricksBaseUrl(url || ''))
-        .catch(() => setDatabricksBaseUrl(''));
+        .then((url) => {
+          console.log('[Settings] Loaded Databricks config:', {
+            workspaceUrl: url || '(empty)',
+            workspaceUrlLength: url?.length ?? 0,
+          });
+          setDatabricksBaseUrl(url || '');
+        })
+        .catch((e) => {
+          console.error('[Settings] Failed to load Databricks workspace URL:', e);
+          setDatabricksBaseUrl('');
+        });
     }
     prevProviderRef.current = modelConfig.provider;
   }, [modelConfig.provider]);
@@ -540,10 +550,15 @@ export function ModelSettingsModal({
 
     // Persist Databricks workspace URL with the same Save so both endpoint and URL persist
     if (modelConfig.provider === 'databricks' && databricksBaseUrl?.trim()) {
+      console.log('[Settings] Saving Databricks config:', {
+        workspaceUrl: databricksBaseUrl.trim(),
+        endpointName: updatedConfig.model,
+      });
       try {
         await invoke('secure_store', { key: 'databricks_base_url', value: databricksBaseUrl.trim() });
+        console.log('[Settings] Databricks workspace URL saved successfully');
       } catch (e) {
-        console.error('Failed to save Databricks workspace URL:', e);
+        console.error('[Settings] Failed to save Databricks workspace URL:', e);
         toast.error('Failed to save workspace URL');
       }
     }

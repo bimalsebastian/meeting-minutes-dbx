@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
-import { DatabricksAzureClient, DatabricksAuthError } from '@/lib/databricks-azure-client';
+import { DatabricksAuthError } from '@/lib/databricks-azure-client';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -106,18 +106,84 @@ export function useSummaryGeneration({
 
       // Databricks: Azure CLI auth + Model Serving
       if (modelConfig.provider === 'databricks') {
+        console.log('[Summary] Databricks provider selected');
+        console.log('[Summary] ========== START DATABRICKS SUMMARY GENERATION ==========');
+        console.log('[Summary] Meeting ID:', meeting.id);
+        console.log('[Summary] Transcript length:', transcriptText.length, 'characters');
+
         const endpoint = (modelConfig.model || modelConfig.databricksEndpoint || '').trim();
+        console.log('[Summary] Config from modelConfig:', {
+          endpointName: endpoint,
+          modelField: modelConfig.model,
+          databricksEndpointField: modelConfig.databricksEndpoint,
+        });
+
         if (!endpoint) {
-          throw new Error('Databricks serving endpoint name is required. Set it in Model Settings.');
+          const err = new Error('Databricks serving endpoint name is required. Set it in Model Settings.');
+          console.error('[Summary] Configuration error:', err.message);
+          throw err;
         }
+
         try {
+          console.log('[Summary] Loading workspace URL from keychain (key: databricks_base_url)...');
           const baseUrl = await invokeTauri<string>('secure_retrieve', { key: 'databricks_base_url' });
+          console.log('[Summary] Config retrieved:', {
+            hasBaseUrl: !!baseUrl?.trim(),
+            baseUrlLength: baseUrl?.length ?? 0,
+            baseUrlPreview: baseUrl?.trim() ? `${baseUrl.trim().slice(0, 50)}...` : '(empty)',
+            endpointName: endpoint,
+          });
+
           if (!baseUrl?.trim()) {
-            throw new Error('Databricks workspace URL is required. Configure it in Model Settings.');
+            const err = new Error('Databricks workspace URL is required. Configure it in Model Settings.');
+            console.error('[Summary] Configuration error:', err.message);
+            throw err;
           }
-          const llmClient = new DatabricksAzureClient(baseUrl.trim(), endpoint);
+
+          // Get token (keychain first, then Azure CLI) — no fetch from frontend to avoid CORS/preflight
+          console.log('[Summary] Loading token for backend call...');
+          let token = await invokeTauri<string>('secure_retrieve', { key: 'databricks_token' }).catch(() => '');
+          if (!token?.trim()) {
+            console.log('[Summary] No stored token, fetching via Azure CLI...');
+            token = await invokeTauri<string>('get_databricks_token').catch((e) => {
+              throw new DatabricksAuthError(String(e));
+            });
+            if (token?.trim()) {
+              await invokeTauri('secure_store', { key: 'databricks_token', value: token.trim() });
+            }
+          }
+          if (!token?.trim()) {
+            throw new DatabricksAuthError('No token. Sign in via Azure CLI in Settings.');
+          }
+
+          console.log('[Summary] Calling backend databricks_generate_summary (no frontend fetch)...');
           setSummaryStatus('summarizing');
-          const markdown = await llmClient.generateSummary(transcriptText);
+
+          let markdown: string;
+          try {
+            markdown = await invokeTauri<string>('databricks_generate_summary', {
+              args: {
+                workspaceUrl: baseUrl.trim().replace(/\/$/, ''),
+                endpointName: endpoint,
+                token: token.trim(),
+                transcript: transcriptText,
+              },
+            });
+            console.log('[Summary] Summary generated successfully, length:', markdown?.length ?? 0);
+          } catch (genErr: unknown) {
+            const msg = genErr instanceof Error ? genErr.message : String(genErr);
+            console.error('[Summary] databricks_generate_summary failed:', {
+              errorName: genErr instanceof Error ? genErr.name : undefined,
+              errorMessage: msg,
+              fullError: genErr,
+            });
+            if (/auth|sign in|401|token|expired|invalid/i.test(msg)) {
+              throw new DatabricksAuthError(msg);
+            }
+            throw genErr;
+          }
+
+          console.log('[Summary] ========== DATABRICKS SUMMARY GENERATION SUCCESS ==========');
           setAiSummary({ markdown } as unknown as Summary);
           setSummaryStatus('completed');
           await invokeTauri('api_save_meeting_summary', {
@@ -129,6 +195,12 @@ export function useSummaryGeneration({
           await Analytics.trackSummaryGenerationCompleted(modelConfig.provider, modelConfig.model, true);
           return;
         } catch (err) {
+          console.error('[Summary] ========== DATABRICKS SUMMARY GENERATION FAILED ==========');
+          console.error('[Summary] Error:', {
+            message: err instanceof Error ? err.message : String(err),
+            name: err instanceof Error ? err.name : undefined,
+            stack: err instanceof Error ? err.stack : undefined,
+          });
           if (err instanceof DatabricksAuthError) {
             setSummaryError(err.message);
             setSummaryStatus('error');
@@ -431,13 +503,28 @@ export function useSummaryGeneration({
   }, []);
 
   // Public API: Generate summary from transcripts
+  // NOTE: modelConfig is passed from parent (page-content.tsx) which gets it from useConfig() / ConfigContext.
+  // ConfigContext loads it on mount via configService.getModelConfig() (backend api_get_model_config).
+  // For Databricks, workspace URL is NOT in modelConfig; it is loaded from keychain (databricks_base_url) inside processSummary.
   const handleGenerateSummary = useCallback(async (customPrompt: string = '') => {
+    console.log('[Summary] handleGenerateSummary called');
+
     // Check if model config is still loading
     if (isModelConfigLoading) {
       console.log('⏳ Model configuration is still loading, please wait...');
       toast.info('Loading model configuration, please wait...');
       return;
     }
+
+    console.log('[Summary] Loading model config...');
+    console.log('[Summary] Model config loaded:', {
+      provider: modelConfig?.provider,
+      hasEndpoint: !!modelConfig?.model,
+      endpoint: modelConfig?.model,
+      databricksEndpoint: modelConfig?.databricksEndpoint,
+      note: "workspaceUrl is loaded from keychain (databricks_base_url) in processSummary when provider is databricks",
+      fullConfig: modelConfig,
+    });
 
     // CHANGE: Fetch ALL transcripts from database, not from pagination state
     console.log('📊 Fetching all transcripts for summary generation...');

@@ -10,7 +10,12 @@ members = [
 edition = "2021"
 rust-version = "1.77"
 
-# Shared dependencies that can be inherited by workspace members
+# Patch alloc-no-stdlib 2.0.4: crates.io tarball declares [[bin]] example but doesn't include the file
+[patch.crates-io]
+alloc-no-stdlib = { git = "https://github.com/dropbox/rust-alloc-no-stdlib", branch = "master" }
+alloc-stdlib = { git = "https://github.com/dropbox/rust-alloc-no-stdlib", branch = "master" }
+
+# Shared dependencies that can be inherited by workspace members that can be inherited by workspace members
 [workspace.dependencies]
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }

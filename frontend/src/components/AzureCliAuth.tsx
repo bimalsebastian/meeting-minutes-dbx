@@ -36,17 +36,24 @@ export function AzureCliAuth({
   const checkStatus = useCallback(async () => {
     setStatus('checking');
     setErrorMessage(null);
+    console.log('[AzureCLI] Checking Azure CLI installed...');
     try {
       await invoke('check_azure_cli_installed');
+      console.log('[AzureCLI] Azure CLI is installed');
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[AzureCLI] Azure CLI check failed:', msg);
       setStatus('not_installed');
-      setErrorMessage(e instanceof Error ? e.message : String(e));
+      setErrorMessage(msg);
       return;
     }
+    console.log('[AzureCLI] Checking Azure login status...');
     try {
       await invoke('check_azure_logged_in');
+      console.log('[AzureCLI] User is logged in to Azure');
       setStatus('ready');
-    } catch {
+    } catch (e) {
+      console.log('[AzureCLI] Not logged in:', e instanceof Error ? e.message : String(e));
       setStatus('not_logged_in');
       setErrorMessage('You are not logged in to Azure. Click "Sign in with Azure CLI" to open the login flow.');
     }
@@ -57,16 +64,19 @@ export function AzureCliAuth({
   }, [checkStatus]);
 
   const handleLogin = async () => {
+    console.log('[AzureCLI] Starting az login --use-device-code...');
     setIsLoading(true);
     setErrorMessage(null);
     try {
       await invoke('do_azure_login');
+      console.log('[AzureCLI] az login command completed successfully');
       toast.success('Login started', {
         description: 'Complete sign-in in the terminal or browser window that opened.',
       });
       await checkStatus();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      console.error('[AzureCLI] Login failed:', msg);
       setErrorMessage(msg);
       toast.error('Azure login failed', { description: msg });
     } finally {
@@ -79,18 +89,28 @@ export function AzureCliAuth({
       toast.error('Enter and save your Workspace URL first');
       return;
     }
+    console.log('[AzureCLI] ========== GET DATABRICKS TOKEN ==========');
+    console.log('[AzureCLI] Workspace URL:', baseUrl.trim());
     setIsGettingToken(true);
     setErrorMessage(null);
     try {
       const token = await invoke<string>('get_databricks_token');
+      console.log('[AzureCLI] get_databricks_token response:', {
+        hasToken: !!token?.trim(),
+        tokenLength: token?.length ?? 0,
+      });
       if (token?.trim()) {
         await invoke('secure_store', { key: 'databricks_token', value: token.trim() });
+        console.log('[AzureCLI] Token saved to keychain (key: databricks_token)');
         setStatus('token_obtained');
         onTokenObtained?.();
         toast.success('Databricks token obtained and stored.');
+      } else {
+        console.error('[AzureCLI] get_databricks_token returned empty token');
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      console.error('[AzureCLI] Get token failed:', { message: msg, error: e });
       setErrorMessage(msg);
       toast.error('Failed to get token', { description: msg });
     } finally {

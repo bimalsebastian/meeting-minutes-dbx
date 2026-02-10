@@ -49,16 +49,25 @@ export class DatabricksAzureClient {
 
   /** Get a valid access token (from keychain if stored, otherwise via get_databricks_token). */
   async getValidAccessToken(): Promise<string> {
-    const stored = await invoke<string>('secure_retrieve', { key: STORAGE_KEY_TOKEN }).catch(() => '');
+    console.log('[Databricks] Loading token from keychain (key: databricks_token)...');
+    const stored = await invoke<string>('secure_retrieve', { key: STORAGE_KEY_TOKEN }).catch((e) => {
+      console.log('[Databricks] Keychain retrieve failed (will fetch via Azure CLI):', e);
+      return '';
+    });
     if (stored?.trim()) {
+      console.log('[Databricks] Using stored token, length:', stored.trim().length);
       return stored.trim();
     }
+    console.log('[Databricks] No stored token, calling get_databricks_token (Azure CLI)...');
     const token = await invoke<string>('get_databricks_token').catch((e) => {
+      console.error('[Databricks] get_databricks_token failed:', e);
       throw new DatabricksAuthError(String(e));
     });
     if (!token?.trim()) {
+      console.error('[Databricks] get_databricks_token returned empty token');
       throw new DatabricksAuthError('No token. Sign in via Azure CLI in Settings.');
     }
+    console.log('[Databricks] Token obtained, length:', token.trim().length, '- storing in keychain');
     await invoke('secure_store', { key: STORAGE_KEY_TOKEN, value: token.trim() });
     return token.trim();
   }
@@ -68,8 +77,15 @@ export class DatabricksAzureClient {
    * On 401, re-fetches token via get_databricks_token and retries once.
    */
   async generateSummary(transcript: string): Promise<string> {
+    console.log('[Databricks] generateSummary: building request', {
+      baseUrl: this.baseUrl,
+      endpoint: this.endpoint,
+      transcriptLength: transcript.length,
+    });
+
     let token = await this.getValidAccessToken();
     const url = `${this.baseUrl}/serving-endpoints/${encodeURIComponent(this.endpoint)}/invocations`;
+    console.log('[Databricks] Request URL:', url);
 
     const body = {
       messages: [
@@ -89,9 +105,17 @@ export class DatabricksAzureClient {
         body: JSON.stringify(body),
       });
 
+    console.log('[Databricks] Making API request to Databricks Model Serving...');
     let response = await doRequest(token);
 
+    console.log('[Databricks] Response received:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+    });
+
     if (response.status === 401) {
+      console.log('[Databricks] 401 received, refreshing token and retrying...');
       const freshToken = await invoke<string>('get_databricks_token').catch((e) => {
         throw new DatabricksAuthError(String(e));
       });
@@ -100,6 +124,7 @@ export class DatabricksAzureClient {
         token = freshToken.trim();
       }
       response = await doRequest(token);
+      console.log('[Databricks] Retry response:', { status: response.status, ok: response.ok });
       if (response.status === 401) {
         throw new DatabricksAuthError(
           'Databricks authentication expired or invalid. Sign in again via Azure CLI.'
@@ -108,6 +133,14 @@ export class DatabricksAzureClient {
     }
 
     const text = await response.text();
+    if (!response.ok) {
+      console.error('[Databricks] API error response:', {
+        status: response.status,
+        statusText: response.statusText,
+        bodyPreview: text.substring(0, 500),
+      });
+    }
+
     let data: unknown;
     try {
       data = text ? JSON.parse(text) : null;
@@ -124,6 +157,7 @@ export class DatabricksAzureClient {
       throw new DatabricksApiError(message, response.status, err?.error_code);
     }
 
+    console.log('[Databricks] API success, parsing response. Keys:', data && typeof data === 'object' ? Object.keys(data as object) : []);
     return this.extractSummaryFromResponse(data);
   }
 

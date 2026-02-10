@@ -119,6 +119,7 @@ dirs = "5.0.1"
 
 # Additional dependencies for notification system
 url = "2.5.0"
+urlencoding = "2.1"
 
 # macOS Keychain / credential storage
 keyring = "2.0"
