@@ -7,7 +7,8 @@ import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
-import { DatabricksAuthError } from '@/lib/databricks-azure-client';
+import { DatabricksAuthError, getValidDatabricksToken } from '@/lib/databricks-azure-client';
+import { secureRetrieve } from '@/lib/stronghold';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -125,8 +126,8 @@ export function useSummaryGeneration({
         }
 
         try {
-          console.log('[Summary] Loading workspace URL from keychain (key: databricks_base_url)...');
-          const baseUrl = await invokeTauri<string>('secure_retrieve', { key: 'databricks_base_url' });
+          console.log('[Summary] Loading workspace URL from Stronghold (key: databricks_base_url)...');
+          const baseUrl = await secureRetrieve('databricks_base_url');
           console.log('[Summary] Config retrieved:', {
             hasBaseUrl: !!baseUrl?.trim(),
             baseUrlLength: baseUrl?.length ?? 0,
@@ -140,21 +141,9 @@ export function useSummaryGeneration({
             throw err;
           }
 
-          // Get token (keychain first, then Azure CLI) — no fetch from frontend to avoid CORS/preflight
+          // Get token (with expiry check and auto-refresh) — no fetch from frontend to avoid CORS/preflight
           console.log('[Summary] Loading token for backend call...');
-          let token = await invokeTauri<string>('secure_retrieve', { key: 'databricks_token' }).catch(() => '');
-          if (!token?.trim()) {
-            console.log('[Summary] No stored token, fetching via Azure CLI...');
-            token = await invokeTauri<string>('get_databricks_token').catch((e) => {
-              throw new DatabricksAuthError(String(e));
-            });
-            if (token?.trim()) {
-              await invokeTauri('secure_store', { key: 'databricks_token', value: token.trim() });
-            }
-          }
-          if (!token?.trim()) {
-            throw new DatabricksAuthError('No token. Sign in via Azure CLI in Settings.');
-          }
+          const token = await getValidDatabricksToken();
 
           console.log('[Summary] Calling backend databricks_generate_summary (no frontend fetch)...');
           setSummaryStatus('summarizing');
@@ -189,6 +178,12 @@ export function useSummaryGeneration({
           await invokeTauri('api_save_meeting_summary', {
             meetingId: meeting.id,
             summary: { markdown },
+          });
+          await invokeTauri('save_meeting_summary', {
+            meetingId: meeting.id,
+            summaryText: markdown,
+            provider: 'databricks',
+            model: endpoint,
           });
           toast.success('Summary generated successfully!', { description: 'Your meeting summary is ready', duration: 4000 });
           if (onMeetingUpdated) await onMeetingUpdated();
@@ -342,8 +337,16 @@ export function useSummaryGeneration({
           // Check if backend returned markdown format (new flow)
           if (pollingResult.data.markdown) {
             console.log('Received markdown format from backend');
-            setAiSummary({ markdown: pollingResult.data.markdown } as any);
+            const markdown = pollingResult.data.markdown;
+            setAiSummary({ markdown } as any);
             setSummaryStatus('completed');
+
+            await invokeTauri('save_meeting_summary', {
+              meetingId: meeting.id,
+              summaryText: markdown,
+              provider: modelConfig.provider,
+              model: modelConfig.model,
+            }).catch((e) => console.warn('save_meeting_summary failed:', e));
 
             // Show success toast
             toast.success('Summary generated successfully!', {
@@ -418,6 +421,13 @@ export function useSummaryGeneration({
 
           setAiSummary(formattedSummary);
           setSummaryStatus('completed');
+
+          await invokeTauri('save_meeting_summary', {
+            meetingId: meeting.id,
+            summaryText: JSON.stringify(formattedSummary),
+            provider: modelConfig.provider,
+            model: modelConfig.model,
+          }).catch((e) => console.warn('save_meeting_summary failed:', e));
 
           // Show success toast
           toast.success('Summary generated successfully!', {

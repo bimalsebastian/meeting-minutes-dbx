@@ -125,7 +125,7 @@ export default function AnalyticsDataModal({ isOpen, onClose, onConfirmDisable }
   "app_version": "0.2.0",
   "transcription_provider": "parakeet",
   "transcription_model": "parakeet-tdt-0.6b-v3-int8",
-  "summary_provider": "ollama",
+  "summary_provider": "databricks",
   "summary_model": "llama3.2:latest",
   "total_duration_seconds": "125.5",
   "microphone_device_type": "Wired",

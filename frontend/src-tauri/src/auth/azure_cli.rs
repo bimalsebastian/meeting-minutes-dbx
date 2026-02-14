@@ -106,7 +106,7 @@ pub fn do_azure_login() -> Result<(), String> {
 }
 
 /// Get Databricks access token via Azure CLI: `az account get-access-token --resource <resource_id>`.
-/// Returns the access token string; frontend stores it with secure_store.
+/// Returns the access token string; frontend stores it with Stronghold.
 #[tauri::command]
 pub fn get_databricks_token() -> Result<String, String> {
     let (stdout, stderr, ok) = run_az(&[

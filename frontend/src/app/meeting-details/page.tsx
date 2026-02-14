@@ -97,7 +97,7 @@ function MeetingDetailsContent() {
 
         await invoke('api_save_model_config', {
           args: {
-            provider: 'ollama',
+            provider: 'databricks',
             model: '',
             whisperModel: 'large-v3',
             apiKey: null,
@@ -200,6 +200,26 @@ function MeetingDetailsContent() {
 
     const fetchMeetingSummary = async () => {
       try {
+        // Prefer AI summary from summaries table (persisted with provider/model)
+        const persistedSummary = await invoke('get_meeting_summary', {
+          meetingId: meetingId,
+        }) as { summaryText: string; provider: string; model?: string } | null;
+
+        if (persistedSummary?.summaryText) {
+          const text = persistedSummary.summaryText.trim();
+          if (text.startsWith('{')) {
+            try {
+              const parsed = JSON.parse(text) as Summary;
+              setMeetingSummary(parsed);
+              return;
+            } catch {
+              // not JSON, treat as markdown
+            }
+          }
+          setMeetingSummary({ markdown: text } as any);
+          return;
+        }
+
         const summary = await invoke('api_get_summary', {
           meetingId: meetingId,
         }) as any;

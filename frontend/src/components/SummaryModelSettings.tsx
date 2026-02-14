@@ -13,8 +13,8 @@ interface SummaryModelSettingsProps {
 
 export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsProps) {
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'ollama',
-    model: 'llama3.2:latest',
+    provider: 'databricks',
+    model: '',
     whisperModel: 'large-v3',
     apiKey: null,
     ollamaEndpoint: null

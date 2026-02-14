@@ -5,6 +5,7 @@ import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import { SelectedDevices } from '@/components/DeviceSelection';
 import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
+import { secureRetrieve } from '@/lib/stronghold';
 
 export interface OllamaModel {
   name: string;
@@ -84,8 +85,8 @@ const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'ollama',
-    model: 'llama3.2:latest',
+    provider: 'databricks',
+    model: '',
     whisperModel: 'large-v3'
   });
 
@@ -244,8 +245,29 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
             }
           }
 
+          // For databricks, also load endpoint name from Stronghold (same as workspace URL) so it persists across provider switches
+          if (data.provider === 'databricks') {
+            try {
+              const endpointName = await secureRetrieve('databricks_endpoint_name');
+              const modelValue = (endpointName?.trim() || (data.model ?? '')).trim();
+              console.log('[ConfigContext] Loaded Databricks config:', {
+                model: modelValue,
+                fromKeychain: !!endpointName?.trim(),
+                fromApi: data.model,
+              });
+              setModelConfig(prev => ({
+                ...prev,
+                provider: data.provider,
+                model: modelValue,
+                whisperModel: data.whisperModel || prev.whisperModel,
+              }));
+              return;
+            } catch (e) {
+              console.warn('[ConfigContext] Could not load databricks_endpoint_name from keychain:', e);
+            }
+          }
+
           // For non-custom-openai providers, just set base config.
-          // For databricks, never use prev.model fallback (it may be ollama default); use API model as-is so serving endpoint name persists.
           setModelConfig(prev => {
             const modelValue = data.provider === 'databricks'
               ? (data.model ?? '')
@@ -254,7 +276,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
               provider: data.provider,
               model: modelValue,
               fromApi: data.model,
-              note: data.provider === 'databricks' ? '(model = serving endpoint name)' : undefined,
             });
             return {
               ...prev,

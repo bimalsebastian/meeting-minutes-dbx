@@ -1,5 +1,7 @@
 use crate::database::repositories::{
-    meeting::MeetingsRepository, summary::SummaryProcessesRepository,
+    ai_summary::AiSummaryRepository,
+    meeting::MeetingsRepository,
+    summary::SummaryProcessesRepository,
     transcript_chunk::TranscriptChunksRepository,
 };
 use crate::state::AppState;
@@ -24,6 +26,62 @@ pub struct SummaryResponse {
 pub struct ProcessTranscriptResponse {
     pub message: String,
     pub process_id: String,
+}
+
+/// Response for get_meeting_summary: latest AI summary from summaries table.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetMeetingSummaryResponse {
+    #[serde(rename = "summaryText")]
+    pub summary_text: String,
+    pub provider: String,
+    pub model: Option<String>,
+}
+
+/// Saves a meeting's AI summary to the summaries table (provider/model and text).
+#[tauri::command]
+pub async fn save_meeting_summary<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    summary_text: String,
+    provider: String,
+    model: Option<String>,
+) -> Result<(), String> {
+    let pool = state.db_manager.pool();
+    AiSummaryRepository::save_summary(
+        pool,
+        &meeting_id,
+        &summary_text,
+        &provider,
+        model.as_deref(),
+    )
+    .await
+    .map_err(|e| {
+        log_error!("save_meeting_summary failed: {}", e);
+        e.to_string()
+    })
+}
+
+/// Gets the latest AI summary for a meeting from the summaries table.
+#[tauri::command]
+pub async fn get_meeting_summary<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<Option<GetMeetingSummaryResponse>, String> {
+    let pool = state.db_manager.pool();
+    match AiSummaryRepository::get_summary(pool, &meeting_id).await {
+        Ok(Some(row)) => Ok(Some(GetMeetingSummaryResponse {
+            summary_text: row.summary_text,
+            provider: row.provider,
+            model: row.model,
+        })),
+        Ok(None) => Ok(None),
+        Err(e) => {
+            log_error!("get_meeting_summary failed: {}", e);
+            Err(e.to_string())
+        }
+    }
 }
 
 /// Saves a meeting summary (Native SQLx implementation)

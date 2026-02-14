@@ -7,6 +7,7 @@ import { BuiltInModelManager } from '@/components/BuiltInModelManager';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useConfig } from '@/contexts/ConfigContext';
+import { secureRetrieve, secureStore } from '@/lib/stronghold';
 import {
   Select,
   SelectContent,
@@ -23,7 +24,7 @@ import { toast } from 'sonner';
 import { AzureCliAuth } from '@/components/AzureCliAuth';
 
 export interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai' | 'databricks';
+  provider: 'databricks' | 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai';
   model: string;
   whisperModel: string;
   apiKey?: string | null;
@@ -107,6 +108,33 @@ export function ModelSettingsModal({
   // Databricks: workspace URL lifted so modal Save can persist it (same as endpoint via model config)
   const [databricksBaseUrl, setDatabricksBaseUrl] = useState<string>('');
   const prevProviderRef = useRef<string | null>(null);
+
+  // Load Databricks config on initial mount if databricks is selected
+  useEffect(() => {
+    if (modelConfig.provider === 'databricks' && !databricksBaseUrl) {
+      console.log('[Settings] Initial load: Loading Databricks config from Stronghold...');
+      Promise.all([
+        secureRetrieve('databricks_base_url'),
+        secureRetrieve('databricks_endpoint_name'),
+      ])
+        .then(([url, endpointName]) => {
+          console.log('[Settings] Initial load: Loaded Databricks config:', {
+            workspaceUrl: url || '(empty)',
+            endpointName: endpointName || '(empty)',
+          });
+          if (url) {
+            setDatabricksBaseUrl(url);
+          }
+          if (endpointName?.trim() && !modelConfig.model) {
+            setModelConfig((prev) => ({ ...prev, model: endpointName.trim() }));
+          }
+        })
+        .catch((e) => {
+          console.error('[Settings] Initial load: Failed to load Databricks config:', e);
+        });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount
 
   // Use global download context instead of local state
   const { isDownloading, getProgress, downloadingModels } = useOllamaDownload();
@@ -346,25 +374,31 @@ export function ModelSettingsModal({
     modelConfig.topP
   ]);
 
-  // Load Databricks workspace URL from keychain when switching to databricks so one Save persists both
+  // Load Databricks workspace URL and model serving endpoint name from Stronghold when switching to databricks (same persistence as workspace URL)
   useEffect(() => {
     if (modelConfig.provider === 'databricks' && prevProviderRef.current !== 'databricks') {
-      console.log('[Settings] Loading Databricks workspace URL from keychain (key: databricks_base_url)...');
-      invoke<string>('secure_retrieve', { key: 'databricks_base_url' })
-        .then((url) => {
+      console.log('[Settings] Loading Databricks config from Stronghold (databricks_base_url, databricks_endpoint_name)...');
+      Promise.all([
+        secureRetrieve('databricks_base_url'),
+        secureRetrieve('databricks_endpoint_name'),
+      ])
+        .then(([url, endpointName]) => {
           console.log('[Settings] Loaded Databricks config:', {
             workspaceUrl: url || '(empty)',
-            workspaceUrlLength: url?.length ?? 0,
+            endpointName: endpointName || '(empty)',
           });
           setDatabricksBaseUrl(url || '');
+          if (endpointName?.trim()) {
+            setModelConfig((prev) => ({ ...prev, model: endpointName.trim() }));
+          }
         })
         .catch((e) => {
-          console.error('[Settings] Failed to load Databricks workspace URL:', e);
+          console.error('[Settings] Failed to load Databricks config:', e);
           setDatabricksBaseUrl('');
         });
     }
     prevProviderRef.current = modelConfig.provider;
-  }, [modelConfig.provider]);
+  }, [modelConfig.provider, setModelConfig]);
 
   // Reset hasAutoFetched flag and clear models when switching away from Ollama
   useEffect(() => {
@@ -548,18 +582,24 @@ export function ModelSettingsModal({
     setModelConfig(updatedConfig);
     console.log('ModelSettingsModal - handleSave - Updated ModelConfig:', updatedConfig);
 
-    // Persist Databricks workspace URL with the same Save so both endpoint and URL persist
-    if (modelConfig.provider === 'databricks' && databricksBaseUrl?.trim()) {
-      console.log('[Settings] Saving Databricks config:', {
-        workspaceUrl: databricksBaseUrl.trim(),
-        endpointName: updatedConfig.model,
+    // Persist Databricks workspace URL and model serving endpoint name in Stronghold (same pattern so both persist)
+    if (modelConfig.provider === 'databricks') {
+      console.log('[Settings] Saving Databricks config to Stronghold:', {
+        workspaceUrl: databricksBaseUrl?.trim() || '(empty)',
+        endpointName: updatedConfig.model?.trim() || '(empty)',
       });
       try {
-        await invoke('secure_store', { key: 'databricks_base_url', value: databricksBaseUrl.trim() });
-        console.log('[Settings] Databricks workspace URL saved successfully');
+        if (databricksBaseUrl?.trim()) {
+          await secureStore('databricks_base_url', databricksBaseUrl.trim());
+          console.log('[Settings] Databricks workspace URL saved');
+        }
+        if (updatedConfig.model?.trim()) {
+          await secureStore('databricks_endpoint_name', updatedConfig.model.trim());
+          console.log('[Settings] Databricks endpoint name saved');
+        }
       } catch (e) {
-        console.error('[Settings] Failed to save Databricks workspace URL:', e);
-        toast.error('Failed to save workspace URL');
+        console.error('[Settings] Failed to save Databricks config:', e);
+        toast.error('Failed to save Databricks config');
       }
     }
 
@@ -764,6 +804,7 @@ export function ModelSettingsModal({
                 <SelectValue placeholder="Select provider" />
               </SelectTrigger>
               <SelectContent className="max-h-64 overflow-y-auto">
+                <SelectItem value="databricks">Databricks</SelectItem>
                 <SelectItem value="builtin-ai">Built-in AI (Offline, No API needed)</SelectItem>
                 <SelectItem value="claude">Claude</SelectItem>
                 <SelectItem value="custom-openai">Custom Server (OpenAI)</SelectItem>
@@ -771,7 +812,6 @@ export function ModelSettingsModal({
                 <SelectItem value="ollama">Ollama</SelectItem>
                 <SelectItem value="openai">OpenAI</SelectItem>
                 <SelectItem value="openrouter">OpenRouter</SelectItem>
-                <SelectItem value="databricks">Databricks</SelectItem>
               </SelectContent>
             </Select>
 

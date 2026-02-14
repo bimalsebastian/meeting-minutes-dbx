@@ -5,6 +5,11 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import {
+  secureRetrieve,
+  secureStoreWithExpiry,
+  getTokenExpiry,
+} from '@/lib/stronghold';
 
 const STORAGE_KEY_TOKEN = 'databricks_token';
 
@@ -35,6 +40,78 @@ export class DatabricksApiError extends Error {
 
 const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant that summarizes meeting transcripts. Produce a clear, concise summary with key points and action items when relevant.';
 
+/** Buffer before expiry to trigger refresh (5 minutes). */
+const EXPIRY_BUFFER_SECONDS = 300;
+/** Default token lifetime when storing (1 hour). */
+const DEFAULT_TOKEN_EXPIRY_SECONDS = 3600;
+/** Background refresh interval (30 minutes). */
+const BACKGROUND_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
+
+/**
+ * Get a valid Databricks token (stored with expiry or via Azure CLI). Use this when you only need the token (e.g. for backend invoke).
+ */
+export async function getValidDatabricksToken(): Promise<string> {
+  try {
+    const stored = await secureRetrieve(STORAGE_KEY_TOKEN);
+    if (stored?.trim()) {
+      const tokenExpiry = await getTokenExpiry(STORAGE_KEY_TOKEN);
+      const now = Date.now() / 1000;
+      // Use stored token if: we have a known expiry and it's still valid, OR we have no expiry (legacy token – use it and rely on 401 retry if expired)
+      if (tokenExpiry > now + EXPIRY_BUFFER_SECONDS) {
+        return stored.trim();
+      }
+      if (tokenExpiry === 0) {
+        // No expiry stored (old secure_store or missing _expiry key) – use stored token
+        return stored.trim();
+      }
+    }
+    const token = await invoke<string>('get_databricks_token');
+    if (!token?.trim()) {
+      throw new DatabricksAuthError('Failed to obtain token from Azure CLI');
+    }
+    await secureStoreWithExpiry(STORAGE_KEY_TOKEN, token.trim(), DEFAULT_TOKEN_EXPIRY_SECONDS);
+    return token.trim();
+  } catch (error) {
+    if (error instanceof DatabricksAuthError) throw error;
+    throw new DatabricksAuthError(
+      'Failed to obtain Databricks token. Please ensure Azure CLI is authenticated: az login'
+    );
+  }
+}
+
+/**
+ * Start a background task that refreshes the Databricks token every 30 minutes if it is expiring within 1 hour.
+ * Shows a notification if refresh fails. Call the returned function to stop.
+ */
+export function startDatabricksTokenRefreshBackground(baseUrl: string, endpoint: string): () => void {
+  const client = new DatabricksAzureClient(baseUrl, endpoint);
+  const intervalId = setInterval(async () => {
+    try {
+      await client.getValidAccessToken();
+    } catch (e) {
+      console.error('[Databricks] Background token refresh failed:', e);
+      try {
+        await invoke('show_notification', {
+          notification: {
+            title: 'Databricks token refresh failed',
+            body: 'Please run "az login" in Settings to re-authenticate.',
+            notification_type: { SystemError: 'Databricks token refresh failed' },
+            priority: 'Normal',
+            timeout: 'Default',
+            icon: null,
+            sound: true,
+            actions: [],
+          },
+        });
+      } catch (_) {
+        // ignore notification errors
+      }
+    }
+  }, BACKGROUND_REFRESH_INTERVAL_MS);
+
+  return () => clearInterval(intervalId);
+}
+
 /**
  * LLM client for Databricks Model Serving (chat endpoint) using Azure CLI token.
  */
@@ -47,29 +124,45 @@ export class DatabricksAzureClient {
     this.endpoint = endpoint;
   }
 
-  /** Get a valid access token (from keychain if stored, otherwise via get_databricks_token). */
+  /** Get a valid access token (from keychain if stored and not expiring soon, otherwise via get_databricks_token). */
   async getValidAccessToken(): Promise<string> {
-    console.log('[Databricks] Loading token from keychain (key: databricks_token)...');
-    const stored = await invoke<string>('secure_retrieve', { key: STORAGE_KEY_TOKEN }).catch((e) => {
-      console.log('[Databricks] Keychain retrieve failed (will fetch via Azure CLI):', e);
-      return '';
-    });
+    console.log('[Databricks] Getting valid access token...');
+
+    const stored = await secureRetrieve(STORAGE_KEY_TOKEN);
+
     if (stored?.trim()) {
-      console.log('[Databricks] Using stored token, length:', stored.trim().length);
-      return stored.trim();
+      const tokenExpiry = await getTokenExpiry(STORAGE_KEY_TOKEN);
+      const now = Date.now() / 1000;
+
+      if (tokenExpiry > now + EXPIRY_BUFFER_SECONDS) {
+        console.log('[Databricks] Using valid stored token');
+        return stored.trim();
+      }
+      if (tokenExpiry === 0) {
+        console.log('[Databricks] Using stored token (no expiry – legacy or first run)');
+        return stored.trim();
+      }
+
+      console.log('[Databricks] Token expired or expiring soon, refreshing...');
     }
-    console.log('[Databricks] No stored token, calling get_databricks_token (Azure CLI)...');
-    const token = await invoke<string>('get_databricks_token').catch((e) => {
-      console.error('[Databricks] get_databricks_token failed:', e);
-      throw new DatabricksAuthError(String(e));
-    });
-    if (!token?.trim()) {
-      console.error('[Databricks] get_databricks_token returned empty token');
-      throw new DatabricksAuthError('No token. Sign in via Azure CLI in Settings.');
+
+    console.log('[Databricks] Fetching new token via Azure CLI...');
+    try {
+      const token = await invoke<string>('get_databricks_token');
+      if (!token?.trim()) {
+        throw new DatabricksAuthError('Failed to obtain token from Azure CLI');
+      }
+
+      await secureStoreWithExpiry(STORAGE_KEY_TOKEN, token.trim(), DEFAULT_TOKEN_EXPIRY_SECONDS);
+
+      console.log('[Databricks] New token obtained and stored');
+      return token.trim();
+    } catch (error) {
+      console.error('[Databricks] Failed to get token:', error);
+      throw new DatabricksAuthError(
+        'Failed to obtain Databricks token. Please ensure Azure CLI is authenticated: az login'
+      );
     }
-    console.log('[Databricks] Token obtained, length:', token.trim().length, '- storing in keychain');
-    await invoke('secure_store', { key: STORAGE_KEY_TOKEN, value: token.trim() });
-    return token.trim();
   }
 
   /**
@@ -115,19 +208,19 @@ export class DatabricksAzureClient {
     });
 
     if (response.status === 401) {
-      console.log('[Databricks] 401 received, refreshing token and retrying...');
-      const freshToken = await invoke<string>('get_databricks_token').catch((e) => {
-        throw new DatabricksAuthError(String(e));
-      });
-      if (freshToken?.trim()) {
-        await invoke('secure_store', { key: STORAGE_KEY_TOKEN, value: freshToken.trim() });
-        token = freshToken.trim();
+      console.log('[Databricks] 401 received, refreshing token and retrying once...');
+      try {
+        token = await this.getValidAccessToken();
+        response = await doRequest(token);
+        console.log('[Databricks] Retry response:', { status: response.status, ok: response.ok });
+      } catch (refreshError) {
+        throw new DatabricksAuthError(
+          'Databricks authentication expired or invalid. Please run: az login'
+        );
       }
-      response = await doRequest(token);
-      console.log('[Databricks] Retry response:', { status: response.status, ok: response.ok });
       if (response.status === 401) {
         throw new DatabricksAuthError(
-          'Databricks authentication expired or invalid. Sign in again via Azure CLI.'
+          'Databricks authentication expired or invalid. Please run: az login'
         );
       }
     }

@@ -1,9 +1,10 @@
 /**
  * Google Calendar integration for auto-start: OAuth and upcoming meetings.
- * Uses secure storage for tokens; polls for events in the next 10 minutes with conferencing links.
+ * Uses Stronghold for secure token storage.
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { secureStore, secureRetrieve, secureDelete } from '@/lib/stronghold';
 
 const STORAGE_KEYS = {
   tokenSet: 'google_calendar_token_set',
@@ -50,18 +51,6 @@ function generateRandomString(length: number = 43): string {
   }
   const base64 = btoa(String.fromCharCode(...array));
   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '').slice(0, length);
-}
-
-async function secureStore(key: string, value: string): Promise<void> {
-  await invoke('secure_store', { key, value });
-}
-
-async function secureRetrieve(key: string): Promise<string> {
-  return await invoke<string>('secure_retrieve', { key });
-}
-
-async function secureDelete(key: string): Promise<void> {
-  await invoke('secure_delete', { key });
 }
 
 const REFRESH_THRESHOLD_MS = 5 * 60 * 1000;

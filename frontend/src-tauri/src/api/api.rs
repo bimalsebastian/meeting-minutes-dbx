@@ -1,7 +1,7 @@
 use log::{debug as log_debug, error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
 
 use crate::{
@@ -12,7 +12,6 @@ use crate::{
             transcript::TranscriptsRepository,
         },
     },
-    onboarding::load_onboarding_status,
     state::AppState,
     summary::CustomOpenAIConfig,
 };
@@ -466,7 +465,7 @@ pub async fn api_update_profile<R: Runtime>(
 
 #[tauri::command]
 pub async fn api_get_model_config<R: Runtime>(
-    app: AppHandle<R>,
+    _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     _auth_token: Option<String>,
 ) -> Result<Option<ModelConfig>, String> {

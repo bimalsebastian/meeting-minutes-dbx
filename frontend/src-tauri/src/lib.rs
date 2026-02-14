@@ -28,10 +28,6 @@ macro_rules! perf_trace {
     ($($arg:tt)*) => {};
 }
 
-// Make these macros available to other modules
-pub(crate) use perf_debug;
-pub(crate) use perf_trace;
-
 // Re-export async logging macros for external use (removed due to macro conflicts)
 
 // Declare modules
@@ -370,36 +366,6 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     }
 }
 
-// Secure storage (macOS Keychain / Windows Credential Manager / etc.)
-const SECURE_STORE_SERVICE: &str = "com.meetily.oauth";
-
-#[tauri::command]
-fn secure_store(key: String, value: String) -> Result<(), String> {
-    let entry = keyring::Entry::new(SECURE_STORE_SERVICE, &key)
-        .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
-    entry
-        .set_password(&value)
-        .map_err(|e| format!("Failed to store secret: {}", e))
-}
-
-#[tauri::command]
-fn secure_retrieve(key: String) -> Result<String, String> {
-    let entry = keyring::Entry::new(SECURE_STORE_SERVICE, &key)
-        .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
-    entry
-        .get_password()
-        .map_err(|e| format!("Failed to retrieve secret: {}", e))
-}
-
-#[tauri::command]
-fn secure_delete(key: String) -> Result<(), String> {
-    let entry = keyring::Entry::new(SECURE_STORE_SERVICE, &key)
-        .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
-    entry
-        .delete_password()
-        .map_err(|e| format!("Failed to delete secret: {}", e))
-}
-
 // Language preference commands
 #[tauri::command]
 async fn get_language_preference() -> Result<String, String> {
@@ -428,13 +394,30 @@ pub fn get_language_preference_internal() -> Option<String> {
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
+    // Create a simple password hash function for Stronghold
+    let password_hash = |password: &str| {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        
+        let mut hasher = DefaultHasher::new();
+        password.hash(&mut hasher);
+        let hash = hasher.finish();
+        
+        // Convert u64 to 32-byte array for Stronghold
+        let mut result = Vec::with_capacity(32);
+        for _ in 0..4 {
+            result.extend_from_slice(&hash.to_le_bytes());
+        }
+        result
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_stronghold::Builder::new(password_hash).build())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
@@ -677,6 +660,8 @@ pub fn run() {
             summary::api_process_transcript,
             summary::api_get_summary,
             summary::api_save_meeting_summary,
+            summary::save_meeting_summary,
+            summary::get_meeting_summary,
             summary::api_cancel_summary,
             // Template commands
             summary::api_list_templates,
@@ -701,10 +686,6 @@ pub fn run() {
             audio::recording_preferences::get_current_audio_backend,
             audio::recording_preferences::set_audio_backend,
             audio::recording_preferences::get_audio_backend_info,
-            // Secure storage (Keychain) commands
-            secure_store,
-            secure_retrieve,
-            secure_delete,
             // Language preference commands
             get_language_preference,
             set_language_preference,

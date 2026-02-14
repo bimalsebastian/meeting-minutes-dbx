@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
 import { ExternalLink } from 'lucide-react';
+import { secureStore } from '@/lib/stronghold';
 
 export type AzureCliStatus = 'checking' | 'not_installed' | 'not_logged_in' | 'ready' | 'token_obtained';
 
@@ -32,6 +33,30 @@ export function AzureCliAuth({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isGettingToken, setIsGettingToken] = useState(false);
+
+  // Auto-save workspace URL to Stronghold when it changes (on blur)
+  const handleBaseUrlBlur = useCallback(async () => {
+    if (baseUrl?.trim()) {
+      try {
+        await secureStore('databricks_base_url', baseUrl.trim());
+        console.log('[AzureCLI] Workspace URL auto-saved to Stronghold');
+      } catch (e) {
+        console.error('[AzureCLI] Failed to auto-save workspace URL:', e);
+      }
+    }
+  }, [baseUrl]);
+
+  // Auto-save endpoint name to Stronghold when it changes (on blur)
+  const handleEndpointBlur = useCallback(async () => {
+    if (endpoint?.trim()) {
+      try {
+        await secureStore('databricks_endpoint_name', endpoint.trim());
+        console.log('[AzureCLI] Endpoint name auto-saved to Stronghold');
+      } catch (e) {
+        console.error('[AzureCLI] Failed to auto-save endpoint name:', e);
+      }
+    }
+  }, [endpoint]);
 
   const checkStatus = useCallback(async () => {
     setStatus('checking');
@@ -100,8 +125,8 @@ export function AzureCliAuth({
         tokenLength: token?.length ?? 0,
       });
       if (token?.trim()) {
-        await invoke('secure_store', { key: 'databricks_token', value: token.trim() });
-        console.log('[AzureCLI] Token saved to keychain (key: databricks_token)');
+        await secureStore('databricks_token', token.trim());
+        console.log('[AzureCLI] Token saved to Stronghold (key: databricks_token)');
         setStatus('token_obtained');
         onTokenObtained?.();
         toast.success('Databricks token obtained and stored.');
@@ -132,6 +157,7 @@ export function AzureCliAuth({
           id="databricks-base-url"
           value={baseUrl}
           onChange={(e) => onBaseUrlChange?.(e.target.value)}
+          onBlur={handleBaseUrlBlur}
           placeholder="https://adb-xxxx.11.azuredatabricks.net"
           className="mt-1"
         />
@@ -199,6 +225,7 @@ export function AzureCliAuth({
               id="databricks-endpoint"
               value={endpoint}
               onChange={(e) => onEndpointChange(e.target.value)}
+              onBlur={handleEndpointBlur}
               placeholder="my-chat-endpoint"
               className="mt-1"
             />

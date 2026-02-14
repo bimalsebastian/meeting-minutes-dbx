@@ -107,6 +107,18 @@ impl Setting {
     }
 }
 
+/// One row per meeting in the summaries table (latest AI summary with provider/model).
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct AiSummaryRow {
+    pub id: String,
+    pub meeting_id: String,
+    pub summary_text: String,
+    pub provider: String,
+    pub model: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct TranscriptSetting {
     pub id: String,

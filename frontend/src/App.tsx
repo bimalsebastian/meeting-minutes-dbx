@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { secureRetrieve } from '@/lib/stronghold';
 
 /**
  * Databricks now uses the device code flow (no redirect/callback).
@@ -43,8 +44,8 @@ export function useCalendarAutoStart() {
 
         if (!mounted || !enabled) return
 
-        const clientId = process.env.NEXT_PUBLIC_GOOGLE_CALENDAR_CLIENT_ID ?? (await invoke<string>('secure_retrieve', { key: 'google_calendar_client_id' }).catch(() => ''))
-        const redirectUri = process.env.NEXT_PUBLIC_GOOGLE_CALENDAR_REDIRECT_URI ?? (await invoke<string>('secure_retrieve', { key: 'google_calendar_redirect_uri' }).catch(() => 'meetily://oauth/google/callback'))
+        const clientId = process.env.NEXT_PUBLIC_GOOGLE_CALENDAR_CLIENT_ID ?? (await secureRetrieve('google_calendar_client_id'))
+        const redirectUri = process.env.NEXT_PUBLIC_GOOGLE_CALENDAR_REDIRECT_URI ?? (await secureRetrieve('google_calendar_redirect_uri') || 'meetily://oauth/google/callback')
         const config = { clientId: clientId?.trim() ?? '', redirectUri: redirectUri?.trim() || 'meetily://oauth/google/callback' }
         if (!config.clientId) return
 

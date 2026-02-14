@@ -25,7 +25,7 @@ pub struct SaveTranscriptConfigRequest {
 pub struct SettingsRepository;
 
 // Transcript providers: localWhisper, deepgram, elevenLabs, groq, openai
-// Summary providers: openai, claude, ollama, groq, added openrouter
+// Summary providers: databricks, ollama, openai, claude, groq, openrouter, builtin-ai, custom-openai
 // NOTE: Handle data exclusion in the higher layer as this is database abstraction layer(using SELECT *)
 
 impl SettingsRepository {
@@ -97,7 +97,7 @@ impl SettingsRepository {
         let query = format!(
             r#"
             INSERT INTO settings (id, provider, model, whisperModel, "{}")
-            VALUES ('1', 'openai', 'gpt-4o-2024-11-20', 'large-v3', $1)
+            VALUES ('1', 'databricks', '', 'large-v3', $1)
             ON CONFLICT(id) DO UPDATE SET
                 "{}" = $1
             "#,
