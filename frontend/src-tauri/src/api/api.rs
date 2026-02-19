@@ -513,7 +513,7 @@ pub async fn api_get_model_config<R: Runtime>(
     }
 }
 
-/// Args for api_save_model_config. Accepts camelCase from frontend (apiKey, whisperModel, ollamaEndpoint).
+/// Args for api_save_model_config. Accepts camelCase from frontend (apiKey, whisperModel, ollamaEndpoint, databricksWorkspaceUrl).
 #[derive(serde::Deserialize)]
 pub struct SaveModelConfigArgs {
     pub provider: String,
@@ -524,6 +524,8 @@ pub struct SaveModelConfigArgs {
     pub api_key: Option<String>,
     #[serde(alias = "ollamaEndpoint")]
     pub ollama_endpoint: Option<String>,
+    #[serde(alias = "databricksWorkspaceUrl")]
+    pub databricks_workspace_url: Option<String>,
 }
 
 #[tauri::command]
@@ -537,13 +539,15 @@ pub async fn api_save_model_config<R: Runtime>(
     let whisper_model = &args.whisper_model;
     let api_key = &args.api_key;
     let ollama_endpoint = args.ollama_endpoint.as_deref();
+    let databricks_workspace_url = args.databricks_workspace_url.as_deref();
 
     log_info!(
-        "💾 api_save_model_config called: provider='{}' model='{}' (for databricks this is serving endpoint name) whisperModel='{}' ollamaEndpoint={:?} api_key_len={}",
+        "💾 api_save_model_config called: provider='{}' model='{}' (for databricks this is serving endpoint name) whisperModel='{}' ollamaEndpoint={:?} databricksWorkspaceUrl={:?} api_key_len={}",
         provider,
         model,
         whisper_model,
         ollama_endpoint,
+        databricks_workspace_url,
         api_key.as_ref().map_or(0, |k| k.len())
     );
     let pool = state.db_manager.pool();
@@ -554,6 +558,7 @@ pub async fn api_save_model_config<R: Runtime>(
         model,
         whisper_model,
         ollama_endpoint,
+        databricks_workspace_url,
     )
     .await
     {

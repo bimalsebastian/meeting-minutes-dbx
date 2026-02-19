@@ -23,6 +23,9 @@ export interface ModelConfig {
   topP?: number | null;
   // Databricks (only populated when provider is 'databricks'); OAuth config in secure storage
   databricksEndpoint?: string | null;
+  databricksWorkspaceUrl?: string | null;
+  // Obsidian vault sync
+  obsidianVaultPath?: string | null;
 }
 
 export interface CustomOpenAIConfig {

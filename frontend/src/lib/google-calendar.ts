@@ -58,6 +58,7 @@ const REFRESH_THRESHOLD_MS = 5 * 60 * 1000;
 async function getStoredTokenSet(): Promise<GoogleTokenSet | null> {
   try {
     const raw = await secureRetrieve(STORAGE_KEYS.tokenSet);
+    if (!raw) return null; // Handle null from secureRetrieve
     const data = JSON.parse(raw) as GoogleTokenSet;
     if (data?.accessToken && data?.refreshToken != null && typeof data?.expiresAt === 'number') return data;
   } catch {

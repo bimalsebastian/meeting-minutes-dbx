@@ -22,6 +22,7 @@ import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDow
 import { cn, isOllamaNotInstalledError } from '@/lib/utils';
 import { toast } from 'sonner';
 import { AzureCliAuth } from '@/components/AzureCliAuth';
+import { backfillMeetingsToObsidian, BackfillProgress } from '@/lib/obsidian-formatter';
 
 export interface ModelConfig {
   provider: 'databricks' | 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai';
@@ -38,6 +39,9 @@ export interface ModelConfig {
   topP?: number | null;
   // Databricks: model is endpoint name; OAuth config in secure storage
   databricksEndpoint?: string | null;
+  databricksWorkspaceUrl?: string | null;
+  // Obsidian vault sync
+  obsidianVaultPath?: string | null;
 }
 
 interface OllamaModel {
@@ -107,34 +111,87 @@ export function ModelSettingsModal({
 
   // Databricks: workspace URL lifted so modal Save can persist it (same as endpoint via model config)
   const [databricksBaseUrl, setDatabricksBaseUrl] = useState<string>('');
-  const prevProviderRef = useRef<string | null>(null);
+  const hasDatabricksConfigLoadedRef = useRef<boolean>(false);
 
-  // Load Databricks config on initial mount if databricks is selected
+  // Obsidian vault sync
+  const [obsidianVaultPath, setObsidianVaultPath] = useState<string>('');
+  const [backfillState, setBackfillState] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [backfillProgress, setBackfillProgress] = useState<BackfillProgress | null>(null);
+
+  // Single unified Databricks config loader - runs once when provider is databricks
+  // Prevents race condition between mount and provider change effects
   useEffect(() => {
-    if (modelConfig.provider === 'databricks' && !databricksBaseUrl) {
-      console.log('[Settings] Initial load: Loading Databricks config from Stronghold...');
-      Promise.all([
-        secureRetrieve('databricks_base_url'),
-        secureRetrieve('databricks_endpoint_name'),
-      ])
-        .then(([url, endpointName]) => {
-          console.log('[Settings] Initial load: Loaded Databricks config:', {
-            workspaceUrl: url || '(empty)',
-            endpointName: endpointName || '(empty)',
-          });
-          if (url) {
-            setDatabricksBaseUrl(url);
-          }
-          if (endpointName?.trim() && !modelConfig.model) {
-            setModelConfig((prev) => ({ ...prev, model: endpointName.trim() }));
-          }
-        })
-        .catch((e) => {
-          console.error('[Settings] Initial load: Failed to load Databricks config:', e);
+    // Only run once, and only when provider is databricks
+    if (modelConfig.provider !== 'databricks') return;
+    if (hasDatabricksConfigLoadedRef.current) return;
+    hasDatabricksConfigLoadedRef.current = true;
+
+    console.log('[Settings] Loading Databricks config (single load)...');
+
+    Promise.all([
+      secureRetrieve('databricks_base_url'),
+      secureRetrieve('databricks_endpoint_name'),
+      secureRetrieve('obsidian_vault_path'),
+    ])
+      .then(([url, endpointName, vaultPath]) => {
+        console.log('[Settings] Stronghold returned:', {
+          url: url || '(empty)',
+          endpointName: endpointName || '(empty)',
+          vaultPath: vaultPath || '(empty)',
         });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run once on mount
+
+        // For URL: use Stronghold value, fall back to modelConfig field,
+        // never overwrite with empty
+        const resolvedUrl = url?.trim() 
+          || modelConfig.databricksWorkspaceUrl?.trim() 
+          || '';
+        
+        if (resolvedUrl) {
+          setDatabricksBaseUrl(resolvedUrl);
+          console.log('[Settings] Set workspace URL:', resolvedUrl);
+        } else {
+          console.warn('[Settings] No workspace URL found in Stronghold or modelConfig');
+        }
+
+        // For endpoint: use Stronghold value, fall back to modelConfig.model,
+        // never overwrite with empty
+        const resolvedEndpoint = endpointName?.trim() 
+          || modelConfig.model?.trim() 
+          || '';
+        
+        if (resolvedEndpoint && !modelConfig.model?.trim()) {
+          setModelConfig((prev) => ({ ...prev, model: resolvedEndpoint }));
+          console.log('[Settings] Set endpoint name:', resolvedEndpoint);
+        }
+
+        // Load Obsidian vault path
+        const resolvedVaultPath = vaultPath?.trim() || modelConfig.obsidianVaultPath?.trim() || '';
+        if (resolvedVaultPath) {
+          setObsidianVaultPath(resolvedVaultPath);
+          console.log('[Settings] Set Obsidian vault path:', resolvedVaultPath);
+        }
+      })
+      .catch((e) => {
+        console.error('[Settings] Failed to load Databricks config:', e);
+        
+        // On Stronghold failure, fall back to modelConfig values
+        const fallbackUrl = modelConfig.databricksWorkspaceUrl?.trim() || '';
+        const fallbackEndpoint = modelConfig.model?.trim() || '';
+        const fallbackVaultPath = modelConfig.obsidianVaultPath?.trim() || '';
+        
+        if (fallbackUrl) {
+          setDatabricksBaseUrl(fallbackUrl);
+          console.log('[Settings] Using SQLite fallback for URL:', fallbackUrl);
+        }
+        if (fallbackEndpoint) {
+          console.log('[Settings] Using SQLite fallback for endpoint:', fallbackEndpoint);
+        }
+        if (fallbackVaultPath) {
+          setObsidianVaultPath(fallbackVaultPath);
+          console.log('[Settings] Using SQLite fallback for vault path:', fallbackVaultPath);
+        }
+      });
+  }, [modelConfig.provider, modelConfig.databricksWorkspaceUrl, modelConfig.model, modelConfig.obsidianVaultPath, setModelConfig]);
 
   // Use global download context instead of local state
   const { isDownloading, getProgress, downloadingModels } = useOllamaDownload();
@@ -374,32 +431,6 @@ export function ModelSettingsModal({
     modelConfig.topP
   ]);
 
-  // Load Databricks workspace URL and model serving endpoint name from Stronghold when switching to databricks (same persistence as workspace URL)
-  useEffect(() => {
-    if (modelConfig.provider === 'databricks' && prevProviderRef.current !== 'databricks') {
-      console.log('[Settings] Loading Databricks config from Stronghold (databricks_base_url, databricks_endpoint_name)...');
-      Promise.all([
-        secureRetrieve('databricks_base_url'),
-        secureRetrieve('databricks_endpoint_name'),
-      ])
-        .then(([url, endpointName]) => {
-          console.log('[Settings] Loaded Databricks config:', {
-            workspaceUrl: url || '(empty)',
-            endpointName: endpointName || '(empty)',
-          });
-          setDatabricksBaseUrl(url || '');
-          if (endpointName?.trim()) {
-            setModelConfig((prev) => ({ ...prev, model: endpointName.trim() }));
-          }
-        })
-        .catch((e) => {
-          console.error('[Settings] Failed to load Databricks config:', e);
-          setDatabricksBaseUrl('');
-        });
-    }
-    prevProviderRef.current = modelConfig.provider;
-  }, [modelConfig.provider, setModelConfig]);
-
   // Reset hasAutoFetched flag and clear models when switching away from Ollama
   useEffect(() => {
     if (modelConfig.provider !== 'ollama') {
@@ -578,6 +609,12 @@ export function ModelSettingsModal({
       topP: modelConfig.provider === 'custom-openai' && customTopP ? parseFloat(customTopP) : null,
       // For custom-openai, use the customOpenAIModel as the model field
       model: modelConfig.provider === 'custom-openai' ? customOpenAIModel.trim() : modelConfig.model,
+      // Include Databricks workspace URL for SQLite persistence (redundant with Stronghold)
+      databricksWorkspaceUrl: modelConfig.provider === 'databricks' && databricksBaseUrl?.trim()
+        ? databricksBaseUrl.trim()
+        : null,
+      // Include Obsidian vault path for SQLite persistence (redundant with Stronghold)
+      obsidianVaultPath: obsidianVaultPath?.trim() || null,
     };
     setModelConfig(updatedConfig);
     console.log('ModelSettingsModal - handleSave - Updated ModelConfig:', updatedConfig);
@@ -588,22 +625,76 @@ export function ModelSettingsModal({
         workspaceUrl: databricksBaseUrl?.trim() || '(empty)',
         endpointName: updatedConfig.model?.trim() || '(empty)',
       });
-      try {
-        if (databricksBaseUrl?.trim()) {
+
+      // Save URL (non-fatal: also saved via modelConfig.databricksWorkspaceUrl)
+      if (databricksBaseUrl?.trim()) {
+        try {
           await secureStore('databricks_base_url', databricksBaseUrl.trim());
-          console.log('[Settings] Databricks workspace URL saved');
+          console.log('[Settings] Databricks workspace URL saved to Stronghold');
+        } catch (e) {
+          console.warn('[Settings] Stronghold failed for URL, saved to modelConfig instead:', e);
+          // Non-fatal: URL is also saved via modelConfig.databricksWorkspaceUrl
         }
-        if (updatedConfig.model?.trim()) {
+      }
+
+      // Save endpoint name (non-fatal: also saved via modelConfig.model)
+      if (updatedConfig.model?.trim()) {
+        try {
           await secureStore('databricks_endpoint_name', updatedConfig.model.trim());
-          console.log('[Settings] Databricks endpoint name saved');
+          console.log('[Settings] Databricks endpoint name saved to Stronghold');
+        } catch (e) {
+          console.warn('[Settings] Stronghold failed for endpoint, saved to modelConfig instead:', e);
+          // Non-fatal: endpoint is also saved via modelConfig.model
         }
+      }
+    }
+
+    // Save Obsidian vault path to Stronghold
+    if (obsidianVaultPath?.trim()) {
+      try {
+        await secureStore('obsidian_vault_path', obsidianVaultPath.trim());
+        console.log('[Settings] Obsidian vault path saved to Stronghold');
       } catch (e) {
-        console.error('[Settings] Failed to save Databricks config:', e);
-        toast.error('Failed to save Databricks config');
+        console.warn('[Settings] Stronghold failed for vault path, saved to modelConfig instead:', e);
+        // Non-fatal: path is also saved via modelConfig.obsidianVaultPath
       }
     }
 
     onSave(updatedConfig);
+  };
+
+  // Backfill all existing meetings to Obsidian vault
+  const handleBackfillAll = async () => {
+    if (!obsidianVaultPath) {
+      toast.error('Please set an Obsidian vault path first');
+      return;
+    }
+    
+    setBackfillState('running');
+    setBackfillProgress(null);
+    
+    try {
+      const token = (await secureRetrieve('databricks_token')) || '';
+      const final = await backfillMeetingsToObsidian(
+        obsidianVaultPath,
+        modelConfig,
+        token,
+        (p) => setBackfillProgress(p)
+      );
+      setBackfillProgress(final);
+      setBackfillState('done');
+      
+      toast.success('Backfill complete', {
+        description: `${final.completed} synced, ${final.skipped} already existed`,
+        duration: 5000,
+      });
+    } catch (e) {
+      console.error('[Obsidian] Backfill error:', e);
+      setBackfillState('error');
+      toast.error('Backfill failed', {
+        description: 'Check console for details',
+      });
+    }
   };
 
   // Test custom OpenAI connection
@@ -1298,6 +1389,117 @@ export function ModelSettingsModal({
           />
         </div>
       </div> */}
+
+      {/* Obsidian Sync */}
+      <div className="mt-6 border-t pt-4">
+        <h3 className="text-sm font-medium text-gray-700 mb-1">
+          Obsidian Vault Sync
+        </h3>
+        <p className="text-xs text-gray-500 mb-3">
+          Meeting summaries are saved as Markdown files with wikilinks. Syncs automatically when you save a meeting.
+        </p>
+
+        {/* Vault path input + browse button */}
+        <div className="flex gap-2 items-center">
+          <input
+            type="text"
+            value={obsidianVaultPath}
+            onChange={(e) => setObsidianVaultPath(e.target.value)}
+            placeholder="/Users/yourname/Documents/MyVault"
+            className="flex-1 text-sm border rounded px-3 py-2"
+          />
+          <button
+            type="button"
+            onClick={async () => {
+              const { open } = await import('@tauri-apps/plugin-dialog');
+              const selected = await open({ directory: true, multiple: false });
+              if (selected && typeof selected === 'string') {
+                setObsidianVaultPath(selected);
+              }
+            }}
+            className="text-sm px-3 py-2 border rounded hover:bg-gray-50"
+          >
+            Browse
+          </button>
+        </div>
+
+        {obsidianVaultPath && (
+          <p className="text-xs text-green-600 mt-1">
+            ✓ {obsidianVaultPath}
+          </p>
+        )}
+
+        {/* Backfill section — only shown when vault path is set */}
+        {obsidianVaultPath && (
+          <div className="mt-3">
+            {backfillState === 'idle' && (
+              <button
+                type="button"
+                onClick={handleBackfillAll}
+                className="text-sm px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                Sync All Existing Meetings to Obsidian
+              </button>
+            )}
+
+            {backfillState === 'running' && backfillProgress && (
+              <div className="text-sm text-gray-600 space-y-1">
+                <div className="flex justify-between">
+                  <span>Syncing...</span>
+                  <span>
+                    {backfillProgress.completed + backfillProgress.skipped + backfillProgress.failed} / {backfillProgress.total}
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-1.5">
+                  <div
+                    className="bg-blue-600 h-1.5 rounded-full transition-all"
+                    style={{
+                      width: `${Math.round(
+                        ((backfillProgress.completed + backfillProgress.skipped + backfillProgress.failed) /
+                          backfillProgress.total) *
+                          100
+                      )}%`,
+                    }}
+                  />
+                </div>
+                <p className="text-xs text-gray-400 truncate">
+                  {backfillProgress.currentTitle}
+                </p>
+              </div>
+            )}
+
+            {backfillState === 'done' && backfillProgress && (
+              <div className="text-sm space-y-1">
+                <p className="text-green-600 font-medium">✓ Sync complete</p>
+                <p className="text-xs text-gray-500">
+                  {backfillProgress.completed} synced · {backfillProgress.skipped} already existed ·{' '}
+                  {backfillProgress.failed > 0 ? `${backfillProgress.failed} failed` : '0 failed'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setBackfillState('idle')}
+                  className="text-xs text-blue-600 underline"
+                >
+                  Sync again
+                </button>
+              </div>
+            )}
+
+            {backfillState === 'error' && (
+              <div className="text-sm text-red-600">
+                ✗ Sync failed — check console for details.{' '}
+                <button
+                  type="button"
+                  onClick={() => setBackfillState('idle')}
+                  className="underline"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="mt-6 flex justify-end">
         <Button

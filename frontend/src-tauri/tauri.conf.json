@@ -66,6 +66,8 @@
                         "process:default",
                         "deep-link:default",
                         "stronghold:default",
+                        "dialog:default",
+                        "dialog:allow-open",
                         {
                             "identifier": "fs:scope",
                             "allow": [

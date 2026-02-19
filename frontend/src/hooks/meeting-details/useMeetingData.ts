@@ -4,14 +4,18 @@ import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummary
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
+import { renameObsidianNote, syncMeetingToObsidian } from '@/lib/obsidian-formatter';
+import { secureRetrieve } from '@/lib/stronghold';
+import { ModelConfig } from '@/components/ModelSettingsModal';
 
 interface UseMeetingDataProps {
   meeting: any;
   summaryData: Summary | null;
   onMeetingUpdated?: () => Promise<void>;
+  modelConfig: ModelConfig; // Add modelConfig for Obsidian sync
 }
 
-export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMeetingDataProps) {
+export function useMeetingData({ meeting, summaryData, onMeetingUpdated, modelConfig }: UseMeetingDataProps) {
   // State
   // Use prop directly since summary generation fetches transcripts independently
   const transcripts = meeting.transcripts;
@@ -46,6 +50,18 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   }, []);
 
   const handleSaveMeetingTitle = useCallback(async () => {
+    // Capture old title BEFORE save for Obsidian rename
+    let oldTitle: string | null = null;
+    try {
+      const existing = await invokeTauri<{ title: string }>('api_get_meeting', {
+        meetingId: meeting.id,
+      });
+      oldTitle = existing?.title?.trim() || null;
+      console.log('[Obsidian] Old title captured:', oldTitle);
+    } catch (e) {
+      console.warn('[Obsidian] Could not capture old title:', e);
+    }
+
     try {
       await invokeTauri('api_save_meeting_title', {
         meetingId: meeting.id,
@@ -61,6 +77,31 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       );
       setMeetings(updatedMeetings);
       setCurrentMeeting({ id: meeting.id, title: meetingTitle });
+
+      // Rename Obsidian note if vault is configured
+      try {
+        const vaultPath = (await secureRetrieve('obsidian_vault_path'))?.trim()
+          || modelConfig.obsidianVaultPath?.trim()
+          || '';
+        
+        if (vaultPath && oldTitle && oldTitle !== meetingTitle.trim()) {
+          const meetingDate = meeting.created_at
+            ? new Date(meeting.created_at).toISOString().split('T')[0]
+            : new Date().toISOString().split('T')[0];
+          
+          await renameObsidianNote({
+            vaultPath,
+            meetingDate,
+            oldTitle,
+            newTitle: meetingTitle.trim(),
+          });
+          console.log('[Obsidian] Renamed vault file after title change');
+        }
+      } catch (obsidianErr) {
+        console.error('[Obsidian] Rename failed (non-fatal):', obsidianErr);
+        // Non-fatal: don't block title save
+      }
+
       return true;
     } catch (error) {
       console.error('Failed to save meeting title:', error);
@@ -71,7 +112,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       }
       return false;
     }
-  }, [meeting.id, meetingTitle, sidebarMeetings, setMeetings, setCurrentMeeting]);
+  }, [meeting.id, meeting.created_at, meetingTitle, sidebarMeetings, setMeetings, setCurrentMeeting, modelConfig]);
 
   const handleSaveSummary = useCallback(async (summary: Summary | { markdown?: string; summary_json?: any[] }) => {
     console.log('📄 handleSaveSummary called with:', {
@@ -132,6 +173,47 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
         await handleSaveSummary(aiSummary);
       }
 
+      // Sync to Obsidian if vault configured and summary exists
+      try {
+        const vaultPath = (await secureRetrieve('obsidian_vault_path'))?.trim()
+          || modelConfig.obsidianVaultPath?.trim()
+          || '';
+        
+        if (vaultPath && aiSummary) {
+          const token = (await secureRetrieve('databricks_token')) || '';
+          const meetingDate = meeting.created_at
+            ? new Date(meeting.created_at).toISOString().split('T')[0]
+            : new Date().toISOString().split('T')[0];
+          const meetingTitle = meeting.title || `Meeting ${meetingDate}`;
+          
+          // Extract summary text from various formats
+          let summaryText = '';
+          if ('markdown' in aiSummary && typeof aiSummary.markdown === 'string') {
+            summaryText = aiSummary.markdown;
+          } else if ('summary_json' in aiSummary && aiSummary.summary_json) {
+            summaryText = JSON.stringify(aiSummary.summary_json, null, 2);
+          } else {
+            summaryText = JSON.stringify(aiSummary, null, 2);
+          }
+          
+          if (summaryText) {
+            await syncMeetingToObsidian({
+              meetingTitle,
+              meetingDate,
+              duration: 'Unknown',
+              summaryText,
+              modelConfig,
+              token,
+              vaultPath,
+            });
+            console.log('[Obsidian] Save sync complete');
+          }
+        }
+      } catch (obsidianErr) {
+        console.error('[Obsidian] Save sync failed (non-fatal):', obsidianErr);
+        // Never block meeting save on Obsidian failure
+      }
+
       toast.success("Changes saved successfully");
     } catch (error) {
       console.error('Failed to save changes:', error);
@@ -139,7 +221,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     } finally {
       setIsSaving(false);
     }
-  }, [isTitleDirty, handleSaveMeetingTitle, aiSummary, handleSaveSummary]);
+  }, [isTitleDirty, handleSaveMeetingTitle, aiSummary, handleSaveSummary, meeting, modelConfig]);
 
   // Update meeting title from external source (e.g., AI summary)
   const updateMeetingTitle = useCallback((newTitle: string) => {

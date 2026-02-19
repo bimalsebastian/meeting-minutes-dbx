@@ -9,6 +9,7 @@ import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
 import { DatabricksAuthError, getValidDatabricksToken } from '@/lib/databricks-azure-client';
 import { secureRetrieve } from '@/lib/stronghold';
+import { syncMeetingToObsidian } from '@/lib/obsidian-formatter';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -58,6 +59,49 @@ export function useSummaryGeneration({
         return '';
     }
   }, []);
+
+  // Obsidian sync helper — NO transcripts, summaries only
+  const syncToObsidian = useCallback(async (summaryText: string) => {
+    try {
+      const vaultPath = (await secureRetrieve('obsidian_vault_path'))?.trim()
+        || modelConfig.obsidianVaultPath?.trim()
+        || '';
+      
+      if (!vaultPath) {
+        console.log('[Obsidian] No vault path, skipping auto-sync');
+        return;
+      }
+      
+      const token = (await secureRetrieve('databricks_token')) || '';
+      const meetingDate = meeting.created_at
+        ? new Date(meeting.created_at).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0];
+      const meetingTitle = meeting.title || `Meeting ${meetingDate}`;
+      const duration = 'Unknown'; // Duration not tracked in current schema
+      
+      await syncMeetingToObsidian({
+        meetingTitle,
+        meetingDate,
+        duration,
+        summaryText,
+        modelConfig,
+        token,
+        vaultPath,
+      });
+      
+      toast.success('Saved to Obsidian', {
+        description: 'Meeting note created in vault',
+        duration: 3000,
+      });
+    } catch (e) {
+      console.error('[Obsidian] Auto-sync after generation failed:', e);
+      // Non-fatal — never block summary display
+      toast.error('Obsidian sync failed', {
+        description: 'Summary saved but could not write to vault',
+        duration: 3000,
+      });
+    }
+  }, [meeting, modelConfig]);
 
   // Unified summary processing logic
   const processSummary = useCallback(async ({
@@ -127,15 +171,18 @@ export function useSummaryGeneration({
 
         try {
           console.log('[Summary] Loading workspace URL from Stronghold (key: databricks_base_url)...');
-          const baseUrl = await secureRetrieve('databricks_base_url');
+          const baseUrlFromStronghold = await secureRetrieve('databricks_base_url');
+          const baseUrl = baseUrlFromStronghold?.trim() || modelConfig.databricksWorkspaceUrl?.trim() || '';
           console.log('[Summary] Config retrieved:', {
-            hasBaseUrl: !!baseUrl?.trim(),
-            baseUrlLength: baseUrl?.length ?? 0,
-            baseUrlPreview: baseUrl?.trim() ? `${baseUrl.trim().slice(0, 50)}...` : '(empty)',
+            hasBaseUrl: !!baseUrl,
+            fromStronghold: baseUrlFromStronghold?.trim() ? 'yes' : 'no',
+            fromModelConfig: modelConfig.databricksWorkspaceUrl?.trim() ? 'yes' : 'no',
+            baseUrlLength: baseUrl.length,
+            baseUrlPreview: baseUrl ? `${baseUrl.slice(0, 50)}...` : '(empty)',
             endpointName: endpoint,
           });
 
-          if (!baseUrl?.trim()) {
+          if (!baseUrl) {
             const err = new Error('Databricks workspace URL is required. Configure it in Model Settings.');
             console.error('[Summary] Configuration error:', err.message);
             throw err;
@@ -186,6 +233,10 @@ export function useSummaryGeneration({
             model: endpoint,
           });
           toast.success('Summary generated successfully!', { description: 'Your meeting summary is ready', duration: 4000 });
+          
+          // Sync to Obsidian if configured (NO transcript)
+          await syncToObsidian(markdown);
+          
           if (onMeetingUpdated) await onMeetingUpdated();
           await Analytics.trackSummaryGenerationCompleted(modelConfig.provider, modelConfig.model, true);
           return;
@@ -354,6 +405,9 @@ export function useSummaryGeneration({
               duration: 4000,
             });
 
+            // Sync to Obsidian if configured (NO transcript)
+            await syncToObsidian(markdown);
+
             if (meetingName && onMeetingUpdated) {
               await onMeetingUpdated();
             }
@@ -434,6 +488,10 @@ export function useSummaryGeneration({
             description: 'Your meeting summary is ready',
             duration: 4000,
           });
+
+          // Sync to Obsidian if configured (convert legacy format to markdown, NO transcript)
+          const legacySummaryMarkdown = JSON.stringify(formattedSummary, null, 2);
+          await syncToObsidian(legacySummaryMarkdown);
 
           await Analytics.trackSummaryGenerationCompleted(
             modelConfig.provider,

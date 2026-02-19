@@ -121,6 +121,9 @@ dirs = "5.0.1"
 url = "2.5.0"
 urlencoding = "2.1"
 
+# Argon2 for deterministic Stronghold password hashing
+argon2 = "0.5"
+
 # Additional dependencies for notification system
 sysinfo = "0.32"
 

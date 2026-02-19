@@ -212,12 +212,81 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
   // Load model configuration on mount
   useEffect(() => {
+    const resolveProviderOnStartup = async (loadedConfig: ModelConfig): Promise<ModelConfig> => {
+      console.log('[Startup] Checking Databricks availability...');
+      
+      try {
+        // Check Stronghold first, then SQLite fallback
+        const [strongholdUrl, strongholdEndpoint] = await Promise.all([
+          secureRetrieve('databricks_base_url'),
+          secureRetrieve('databricks_endpoint_name'),
+        ]);
+        
+        const workspaceUrl = strongholdUrl?.trim() 
+          || loadedConfig.databricksWorkspaceUrl?.trim() 
+          || '';
+        const endpointName = strongholdEndpoint?.trim() 
+          || loadedConfig.model?.trim() 
+          || '';
+        
+        console.log('[Startup] Databricks config check:', {
+          workspaceUrl: workspaceUrl || '(empty)',
+          endpointName: endpointName || '(empty)',
+          currentProvider: loadedConfig.provider,
+        });
+        
+        // If Databricks is fully configured, make it the active provider
+        if (workspaceUrl && endpointName) {
+          console.log('[Startup] Databricks configured — setting as active provider');
+          
+          const updatedConfig: ModelConfig = {
+            ...loadedConfig,
+            provider: 'databricks',
+            model: endpointName,
+            databricksWorkspaceUrl: workspaceUrl,
+          };
+          
+          // Persist this provider selection back to SQLite so it 
+          // survives the next restart too
+          try {
+            await invoke('api_save_model_config', {
+              args: {
+                provider: updatedConfig.provider,
+                model: updatedConfig.model,
+                whisperModel: updatedConfig.whisperModel,
+                apiKey: null,
+                ollamaEndpoint: null,
+                databricksWorkspaceUrl: updatedConfig.databricksWorkspaceUrl,
+              },
+            });
+            console.log('[Startup] Saved Databricks as active provider to database');
+          } catch (saveErr) {
+            console.warn('[Startup] Failed to save Databricks provider to database:', saveErr);
+          }
+          
+          return updatedConfig;
+        }
+        
+        console.log('[Startup] Databricks not fully configured, keeping provider:', 
+          loadedConfig.provider);
+        return loadedConfig;
+        
+      } catch (e) {
+        // Stronghold not ready yet or other error — don't block startup
+        console.warn('[Startup] Could not check Databricks availability:', e);
+        return loadedConfig;
+      }
+    };
+
     const fetchModelConfig = async () => {
       try {
         const data = await configService.getModelConfig();
         if (data && data.provider) {
+          // First, check if we should auto-promote Databricks
+          const resolvedData = await resolveProviderOnStartup(data);
+          
           // If provider is custom-openai, fetch the additional config
-          if (data.provider === 'custom-openai') {
+          if (resolvedData.provider === 'custom-openai') {
             try {
               const customConfig = await configService.getCustomOpenAIConfig();
               if (customConfig) {
@@ -228,9 +297,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                 });
                 setModelConfig(prev => ({
                   ...prev,
-                  provider: data.provider,
-                  model: customConfig.model || data.model || prev.model,
-                  whisperModel: data.whisperModel || prev.whisperModel,
+                  provider: resolvedData.provider,
+                  model: customConfig.model || resolvedData.model || prev.model,
+                  whisperModel: resolvedData.whisperModel || prev.whisperModel,
                   customOpenAIEndpoint: customConfig.endpoint,
                   customOpenAIModel: customConfig.model,
                   customOpenAIApiKey: customConfig.apiKey,
@@ -246,42 +315,44 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           }
 
           // For databricks, also load endpoint name from Stronghold (same as workspace URL) so it persists across provider switches
-          if (data.provider === 'databricks') {
+          if (resolvedData.provider === 'databricks') {
             try {
               const endpointName = await secureRetrieve('databricks_endpoint_name');
-              const modelValue = (endpointName?.trim() || (data.model ?? '')).trim();
+              const modelValue = (endpointName?.trim() || (resolvedData.model ?? '')).trim();
               console.log('[ConfigContext] Loaded Databricks config:', {
                 model: modelValue,
-                fromKeychain: !!endpointName?.trim(),
-                fromApi: data.model,
+                workspaceUrl: resolvedData.databricksWorkspaceUrl || '(empty)',
+                fromStronghold: !!endpointName?.trim(),
+                fromDatabase: resolvedData.model,
               });
               setModelConfig(prev => ({
                 ...prev,
-                provider: data.provider,
+                provider: resolvedData.provider,
                 model: modelValue,
-                whisperModel: data.whisperModel || prev.whisperModel,
+                whisperModel: resolvedData.whisperModel || prev.whisperModel,
+                databricksWorkspaceUrl: resolvedData.databricksWorkspaceUrl || null,
               }));
               return;
             } catch (e) {
-              console.warn('[ConfigContext] Could not load databricks_endpoint_name from keychain:', e);
+              console.warn('[ConfigContext] Could not load databricks_endpoint_name from Stronghold:', e);
             }
           }
 
           // For non-custom-openai providers, just set base config.
           setModelConfig(prev => {
-            const modelValue = data.provider === 'databricks'
-              ? (data.model ?? '')
-              : (data.model || prev.model);
+            const modelValue = resolvedData.provider === 'databricks'
+              ? (resolvedData.model ?? '')
+              : (resolvedData.model || prev.model);
             console.log('[ConfigContext] Loaded model config:', {
-              provider: data.provider,
+              provider: resolvedData.provider,
               model: modelValue,
-              fromApi: data.model,
+              fromApi: resolvedData.model,
             });
             return {
               ...prev,
-              provider: data.provider,
+              provider: resolvedData.provider,
               model: modelValue,
-              whisperModel: data.whisperModel || prev.whisperModel,
+              whisperModel: resolvedData.whisperModel || prev.whisperModel,
             };
           });
         }

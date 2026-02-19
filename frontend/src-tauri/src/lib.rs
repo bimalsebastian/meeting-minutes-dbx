@@ -38,6 +38,7 @@ pub mod audio;
 pub mod console_utils;
 pub mod database;
 pub mod notifications;
+pub mod obsidian_sync;
 pub mod ollama;
 pub mod onboarding;
 pub mod openrouter;
@@ -394,21 +395,33 @@ pub fn get_language_preference_internal() -> Option<String> {
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
-    // Create a simple password hash function for Stronghold
+    // CRITICAL: Deterministic password hash for Stronghold vault stability
+    // This MUST produce the same 32-byte key every time for the same password
+    // If the salt or algorithm changes, all existing vault data becomes unreadable
     let password_hash = |password: &str| {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+        use argon2::{
+            password_hash::SaltString,
+            Argon2, Params, PasswordHasher,
+        };
         
-        let mut hasher = DefaultHasher::new();
-        password.hash(&mut hasher);
-        let hash = hasher.finish();
+        // FIXED salt — hardcoded, never changes, same bytes every run
+        let salt = SaltString::encode_b64(b"meetily-dbx-v1-fixed-salt-2024")
+            .expect("valid salt");
         
-        // Convert u64 to 32-byte array for Stronghold
-        let mut result = Vec::with_capacity(32);
-        for _ in 0..4 {
-            result.extend_from_slice(&hash.to_le_bytes());
-        }
-        result
+        let argon2 = Argon2::new(
+            argon2::Algorithm::Argon2id,
+            argon2::Version::V0x13,
+            Params::new(15_000, 2, 1, Some(32)).unwrap(),
+        );
+        
+        let hash = argon2
+            .hash_password(password.as_bytes(), &salt)
+            .expect("Failed to hash password");
+        
+        hash.hash
+            .expect("Hash missing")
+            .as_bytes()
+            .to_vec()
     };
 
     tauri::Builder::default()
@@ -652,6 +665,11 @@ pub fn run() {
             auth::azure_cli::get_databricks_token,
             auth::azure_cli::refresh_databricks_token,
             auth::databricks_summary::databricks_generate_summary,
+            // Obsidian vault sync
+            obsidian_sync::write_obsidian_note,
+            obsidian_sync::obsidian_note_exists,
+            obsidian_sync::rename_obsidian_note,
+            obsidian_sync::get_all_meetings_with_summaries,
             // Custom OpenAI commands
             api::api_save_custom_openai_config,
             api::api_get_custom_openai_config,

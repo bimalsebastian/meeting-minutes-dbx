@@ -170,23 +170,24 @@ pub async fn complete_onboarding<R: Runtime>(
     state: tauri::State<'_, AppState>,
     model: String,
 ) -> Result<(), String> {
-    info!("Completing onboarding with builtin-ai model: {}", model);
+    info!("Completing onboarding with model: {}", model);
 
     // Step 1: Save model configuration to SQLite database FIRST
     let pool = state.db_manager.pool();
 
-    // Onboarding always uses builtin-ai (local LLM)
+    // Onboarding now defaults to databricks (was builtin-ai)
     if let Err(e) = SettingsRepository::save_model_config(
         pool,
-        "builtin-ai",
+        "databricks",
         &model,
         "large-v3",
-        None,
+        None, // ollama_endpoint
+        None, // databricks_workspace_url
     ).await {
-        error!("Failed to save builtin-ai model config: {}", e);
-        return Err(format!("Failed to save builtin-ai model config: {}", e));
+        error!("Failed to save model config: {}", e);
+        return Err(format!("Failed to save model config: {}", e));
     }
-    info!("Saved builtin-ai model config: model={}", model);
+    info!("Saved model config: provider=databricks, model={}", model);
 
     // Save transcription model config (parakeet provider) - always parakeet
     if let Err(e) = SettingsRepository::save_transcript_config(

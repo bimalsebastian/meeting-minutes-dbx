@@ -63,7 +63,7 @@ export default function PageContent({
   const { modelConfig, setModelConfig } = useConfig();
 
   // Custom hooks
-  const meetingData = useMeetingData({ meeting, summaryData, onMeetingUpdated });
+  const meetingData = useMeetingData({ meeting, summaryData, onMeetingUpdated, modelConfig });
   const templates = useTemplates();
 
   // Callback to register the modal open function

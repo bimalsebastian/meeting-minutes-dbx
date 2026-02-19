@@ -96,6 +96,10 @@ pub struct Setting {
     #[sqlx(rename = "customOpenAIConfig")]
     #[serde(rename = "customOpenAIConfig")]
     pub custom_openai_config: Option<String>,
+    /// Databricks workspace URL (stored in both Stronghold and SQLite for redundancy)
+    #[sqlx(rename = "databricks_workspace_url")]
+    #[serde(rename = "databricksWorkspaceUrl")]
+    pub databricks_workspace_url: Option<String>,
 }
 
 impl Setting {
