@@ -18,7 +18,16 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
-import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp, Download, ExternalLink } from 'lucide-react';
+import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp, Download, ExternalLink, Check, ChevronsUpDown } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import { cn, isOllamaNotInstalledError } from '@/lib/utils';
 import { toast } from 'sonner';
 import { AzureCliAuth } from '@/components/AzureCliAuth';
@@ -59,6 +68,47 @@ interface OpenRouterModel {
   completion_price?: string;
 }
 
+interface OpenAIModel {
+  id: string;
+}
+
+interface AnthropicModel {
+  id: string;
+  display_name?: string;
+}
+
+interface GroqModel {
+  id: string;
+  owned_by?: string;
+}
+
+// Fallback models for when API fetch fails or no API key provided
+const OPENAI_FALLBACK_MODELS = [
+  'gpt-4o',
+  'gpt-4o-mini',
+  'gpt-4-turbo',
+  'gpt-4',
+  'gpt-3.5-turbo',
+  'o1',
+  'o1-mini',
+  'o3',
+  'o3-mini',
+];
+
+const CLAUDE_FALLBACK_MODELS = [
+  'claude-sonnet-4-5-20250929',
+  'claude-haiku-4-5-20251001',
+  'claude-opus-4-5-20251101',
+  'claude-3-5-sonnet-latest',
+];
+
+const GROQ_FALLBACK_MODELS = [
+  'llama-3.3-70b-versatile',
+  'llama-3.1-70b-versatile',
+  'mixtral-8x7b-32768',
+  'gemma2-9b-it',
+];
+
 interface ModelSettingsModalProps {
   modelConfig: ModelConfig;
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
@@ -76,6 +126,8 @@ export function ModelSettingsModal({
   const configContext = useConfig();
   const modelConfig = configContext?.modelConfig || propsModelConfig;
   const setModelConfig = configContext?.setModelConfig || propsSetModelConfig;
+  const providerApiKeys = configContext?.providerApiKeys;
+  const updateProviderApiKey = configContext?.updateProviderApiKey;
 
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [error, setError] = useState<string>('');
@@ -118,10 +170,19 @@ export function ModelSettingsModal({
   const [backfillState, setBackfillState] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [backfillProgress, setBackfillProgress] = useState<BackfillProgress | null>(null);
 
+  // Combobox state (upstream)
+  const [modelComboboxOpen, setModelComboboxOpen] = useState<boolean>(false);
+
+  // Dynamic model fetching state for OpenAI, Claude, and Groq (upstream)
+  const [openaiModels, setOpenaiModels] = useState<string[]>([]);
+  const [claudeModels, setClaudeModels] = useState<string[]>([]);
+  const [groqModels, setGroqModels] = useState<string[]>([]);
+  const [isLoadingOpenAI, setIsLoadingOpenAI] = useState<boolean>(false);
+  const [isLoadingClaude, setIsLoadingClaude] = useState<boolean>(false);
+  const [isLoadingGroq, setIsLoadingGroq] = useState<boolean>(false);
+
   // Single unified Databricks config loader - runs once when provider is databricks
-  // Prevents race condition between mount and provider change effects
   useEffect(() => {
-    // Only run once, and only when provider is databricks
     if (modelConfig.provider !== 'databricks') return;
     if (hasDatabricksConfigLoadedRef.current) return;
     hasDatabricksConfigLoadedRef.current = true;
@@ -140,12 +201,7 @@ export function ModelSettingsModal({
           vaultPath: vaultPath || '(empty)',
         });
 
-        // For URL: use Stronghold value, fall back to modelConfig field,
-        // never overwrite with empty
-        const resolvedUrl = url?.trim() 
-          || modelConfig.databricksWorkspaceUrl?.trim() 
-          || '';
-        
+        const resolvedUrl = url?.trim() || modelConfig.databricksWorkspaceUrl?.trim() || '';
         if (resolvedUrl) {
           setDatabricksBaseUrl(resolvedUrl);
           console.log('[Settings] Set workspace URL:', resolvedUrl);
@@ -153,18 +209,12 @@ export function ModelSettingsModal({
           console.warn('[Settings] No workspace URL found in Stronghold or modelConfig');
         }
 
-        // For endpoint: use Stronghold value, fall back to modelConfig.model,
-        // never overwrite with empty
-        const resolvedEndpoint = endpointName?.trim() 
-          || modelConfig.model?.trim() 
-          || '';
-        
+        const resolvedEndpoint = endpointName?.trim() || modelConfig.model?.trim() || '';
         if (resolvedEndpoint && !modelConfig.model?.trim()) {
           setModelConfig((prev) => ({ ...prev, model: resolvedEndpoint }));
           console.log('[Settings] Set endpoint name:', resolvedEndpoint);
         }
 
-        // Load Obsidian vault path
         const resolvedVaultPath = vaultPath?.trim() || modelConfig.obsidianVaultPath?.trim() || '';
         if (resolvedVaultPath) {
           setObsidianVaultPath(resolvedVaultPath);
@@ -173,23 +223,12 @@ export function ModelSettingsModal({
       })
       .catch((e) => {
         console.error('[Settings] Failed to load Databricks config:', e);
-        
-        // On Stronghold failure, fall back to modelConfig values
         const fallbackUrl = modelConfig.databricksWorkspaceUrl?.trim() || '';
         const fallbackEndpoint = modelConfig.model?.trim() || '';
         const fallbackVaultPath = modelConfig.obsidianVaultPath?.trim() || '';
-        
-        if (fallbackUrl) {
-          setDatabricksBaseUrl(fallbackUrl);
-          console.log('[Settings] Using SQLite fallback for URL:', fallbackUrl);
-        }
-        if (fallbackEndpoint) {
-          console.log('[Settings] Using SQLite fallback for endpoint:', fallbackEndpoint);
-        }
-        if (fallbackVaultPath) {
-          setObsidianVaultPath(fallbackVaultPath);
-          console.log('[Settings] Using SQLite fallback for vault path:', fallbackVaultPath);
-        }
+        if (fallbackUrl) setDatabricksBaseUrl(fallbackUrl);
+        if (fallbackEndpoint) console.log('[Settings] Using SQLite fallback for endpoint:', fallbackEndpoint);
+        if (fallbackVaultPath) setObsidianVaultPath(fallbackVaultPath);
       });
   }, [modelConfig.provider, modelConfig.databricksWorkspaceUrl, modelConfig.model, modelConfig.obsidianVaultPath, setModelConfig]);
 
@@ -242,13 +281,6 @@ export function ModelSettingsModal({
     }
   };
 
-  // Sync apiKey from parent when it changes
-  useEffect(() => {
-    if (modelConfig.apiKey !== apiKey) {
-      setApiKey(modelConfig.apiKey || null);
-    }
-  }, [modelConfig.apiKey]);
-
   // Auto-unlock when API key becomes empty, 
   useEffect(() => {
     const hasContent = !!apiKey?.trim();
@@ -259,33 +291,9 @@ export function ModelSettingsModal({
 
   const modelOptions: Record<string, string[]> = {
     ollama: models.map((model) => model.name),
-    claude: ['claude-sonnet-4-5-20250929', 'claude-haiku-4-5-20251001', 'claude-opus-4-5-20251101'],
-    groq: ['llama-3.3-70b-versatile'],
-    openai: [
-      'gpt-5',
-      'gpt-5-mini',
-      'gpt-4o',
-      'gpt-4.1',
-      'gpt-4-turbo',
-      'gpt-3.5-turbo',
-      'gpt-4o-2024-11-20',
-      'gpt-4o-2024-08-06',
-      'gpt-4o-mini-2024-07-18',
-      'gpt-4.1-2025-04-14',
-      'gpt-4.1-nano-2025-04-14',
-      'gpt-4.1-mini-2025-04-14',
-      'o4-mini-2025-04-16',
-      'o3-2025-04-16',
-      'o3-mini-2025-01-31',
-      'o1-2024-12-17',
-      'o1-mini-2024-09-12',
-      'gpt-4-turbo-2024-04-09',
-      'gpt-4-0125-Preview',
-      'gpt-4-vision-preview',
-      'gpt-4-1106-Preview',
-      'gpt-3.5-turbo-0125',
-      'gpt-3.5-turbo-1106'
-    ],
+    claude: claudeModels.length > 0 ? claudeModels : CLAUDE_FALLBACK_MODELS,
+    groq: groqModels.length > 0 ? groqModels : GROQ_FALLBACK_MODELS,
+    openai: openaiModels.length > 0 ? openaiModels : OPENAI_FALLBACK_MODELS,
     openrouter: openRouterModels.map((m) => m.id),
     'builtin-ai': builtinAiModels.map((m) => m.name),
     'custom-openai': customOpenAIModel ? [customOpenAIModel] : [], // User specifies model manually
@@ -407,7 +415,7 @@ export function ModelSettingsModal({
   // Sync custom OpenAI state from modelConfig (context or props)
   useEffect(() => {
     if (modelConfig.provider === 'custom-openai') {
-      console.log('🔄 Syncing custom OpenAI fields from ConfigContext:', {
+      console.log('Syncing custom OpenAI fields from ConfigContext:', {
         endpoint: modelConfig.customOpenAIEndpoint,
         model: modelConfig.customOpenAIModel,
         hasApiKey: !!modelConfig.customOpenAIApiKey,
@@ -462,6 +470,17 @@ export function ModelSettingsModal({
       }
     }
   }, [ollamaEndpoint, lastFetchedEndpoint, modelConfig.provider]);
+
+  // Sync local apiKey state when provider changes
+  useEffect(() => {
+    if (providerApiKeys && requiresApiKey && modelConfig.provider !== 'custom-openai') {
+      const correctKey = providerApiKeys[modelConfig.provider as keyof typeof providerApiKeys];
+      if (correctKey !== apiKey) {
+        setApiKey(correctKey || '');
+        setIsApiKeyLocked(!!correctKey?.trim());
+      }
+    }
+  }, [modelConfig.provider, providerApiKeys, requiresApiKey]);
 
   // Manual fetch function for Ollama models
   const fetchOllamaModels = async (silent = false) => {
@@ -574,6 +593,97 @@ export function ModelSettingsModal({
     }
   };
 
+  // Fetch OpenAI models from API
+  const loadOpenAIModels = async (key: string | null) => {
+    if (!key?.trim()) {
+      setOpenaiModels([]); // Will use fallback via modelOptions
+      return;
+    }
+    setIsLoadingOpenAI(true);
+    try {
+      const data = (await invoke('get_openai_models', { apiKey: key })) as OpenAIModel[];
+      setOpenaiModels(data.map((m) => m.id));
+    } catch (err) {
+      console.error('Error loading OpenAI models:', err);
+      setOpenaiModels([]); // Will use fallback via modelOptions
+    } finally {
+      setIsLoadingOpenAI(false);
+    }
+  };
+
+  // Fetch Anthropic (Claude) models from API
+  const loadClaudeModels = async (key: string | null) => {
+    if (!key?.trim()) {
+      setClaudeModels([]); // Will use fallback via modelOptions
+      return;
+    }
+    setIsLoadingClaude(true);
+    try {
+      const data = (await invoke('get_anthropic_models', { apiKey: key })) as AnthropicModel[];
+      setClaudeModels(data.map((m) => m.id));
+    } catch (err) {
+      console.error('Error loading Claude models:', err);
+      setClaudeModels([]); // Will use fallback via modelOptions
+    } finally {
+      setIsLoadingClaude(false);
+    }
+  };
+
+  // Fetch Groq models from API
+  const loadGroqModels = async (key: string | null) => {
+    if (!key?.trim()) {
+      setGroqModels([]); // Will use fallback via modelOptions
+      return;
+    }
+    setIsLoadingGroq(true);
+    try {
+      const data = (await invoke('get_groq_models', { apiKey: key })) as GroqModel[];
+      setGroqModels(data.map((m) => m.id));
+    } catch (err) {
+      console.error('Error loading Groq models:', err);
+      setGroqModels([]); // Will use fallback via modelOptions
+    } finally {
+      setIsLoadingGroq(false);
+    }
+  };
+
+  // Auto-fetch OpenAI models when provider is openai and we have an API key
+  useEffect(() => {
+    if (modelConfig.provider === 'openai' && apiKey?.trim()) {
+      loadOpenAIModels(apiKey);
+    }
+  }, [modelConfig.provider, apiKey]);
+
+  // Auto-fetch Claude models when provider is claude and we have an API key
+  useEffect(() => {
+    if (modelConfig.provider === 'claude' && apiKey?.trim()) {
+      loadClaudeModels(apiKey);
+    }
+  }, [modelConfig.provider, apiKey]);
+
+  // Auto-fetch Groq models when provider is groq and we have an API key
+  useEffect(() => {
+    if (modelConfig.provider === 'groq' && apiKey?.trim()) {
+      loadGroqModels(apiKey);
+    }
+  }, [modelConfig.provider, apiKey]);
+
+  // Restore cached model when async model lists become available
+  useEffect(() => {
+    const providerModels = modelOptions[modelConfig.provider];
+    if (!providerModels || providerModels.length === 0) return;
+
+    // If current model is already valid, nothing to do
+    if (modelConfig.model && providerModels.includes(modelConfig.model)) return;
+
+    // Try to restore from localStorage cache
+    const map = JSON.parse(localStorage.getItem('providerModelMap') || '{}');
+    const cachedModel = map[modelConfig.provider];
+    if (cachedModel && providerModels.includes(cachedModel)) {
+      setModelConfig((prev: ModelConfig) => ({ ...prev, model: cachedModel }));
+    }
+  }, [models, openRouterModels, builtinAiModels, openaiModels, claudeModels, groqModels, modelConfig.provider]);
+
   const handleSave = async () => {
     // For custom-openai provider, save the custom config first
     if (modelConfig.provider === 'custom-openai') {
@@ -597,9 +707,9 @@ export function ModelSettingsModal({
     const updatedConfig = {
       ...modelConfig,
       apiKey: typeof apiKey === 'string' ? apiKey.trim() || null : null,
-      ollamaEndpoint: modelConfig.provider === 'ollama' && ollamaEndpoint.trim()
-        ? ollamaEndpoint.trim()
-        : null,
+      ollamaEndpoint: modelConfig.provider === 'ollama'
+        ? (ollamaEndpoint.trim() || null)
+        : (modelConfig.ollamaEndpoint || null),
       // Include custom OpenAI fields
       customOpenAIEndpoint: modelConfig.provider === 'custom-openai' ? customOpenAIEndpoint.trim() : null,
       customOpenAIModel: modelConfig.provider === 'custom-openai' ? customOpenAIModel.trim() : null,
@@ -619,34 +729,27 @@ export function ModelSettingsModal({
     setModelConfig(updatedConfig);
     console.log('ModelSettingsModal - handleSave - Updated ModelConfig:', updatedConfig);
 
-    // Persist Databricks workspace URL and model serving endpoint name in Stronghold (same pattern so both persist)
+    // Persist Databricks workspace URL and endpoint name in Stronghold
     if (modelConfig.provider === 'databricks') {
       console.log('[Settings] Saving Databricks config to Stronghold:', {
         workspaceUrl: databricksBaseUrl?.trim() || '(empty)',
         endpointName: updatedConfig.model?.trim() || '(empty)',
       });
-
-      // Save URL (non-fatal: also saved via modelConfig.databricksWorkspaceUrl)
       if (databricksBaseUrl?.trim()) {
         try {
           await secureStore('databricks_base_url', databricksBaseUrl.trim());
           console.log('[Settings] Databricks workspace URL saved to Stronghold');
         } catch (e) {
-          console.warn('[Settings] Stronghold failed for URL, saved to modelConfig instead:', e);
-          // Non-fatal: URL is also saved via modelConfig.databricksWorkspaceUrl
+          console.warn('[Settings] Stronghold failed for URL:', e);
         }
       }
-
-      // Save endpoint name (non-fatal: also saved via modelConfig.model)
       if (updatedConfig.model?.trim()) {
         try {
           await secureStore('databricks_endpoint_name', updatedConfig.model.trim());
           console.log('[Settings] Databricks endpoint name saved to Stronghold');
         } catch (e) {
-          console.warn('[Settings] Stronghold failed for endpoint, saved to modelConfig instead:', e);
-          // Non-fatal: endpoint is also saved via modelConfig.model
+          console.warn('[Settings] Stronghold failed for endpoint:', e);
         }
-      }
     }
 
     // Save Obsidian vault path to Stronghold
@@ -655,9 +758,19 @@ export function ModelSettingsModal({
         await secureStore('obsidian_vault_path', obsidianVaultPath.trim());
         console.log('[Settings] Obsidian vault path saved to Stronghold');
       } catch (e) {
-        console.warn('[Settings] Stronghold failed for vault path, saved to modelConfig instead:', e);
-        // Non-fatal: path is also saved via modelConfig.obsidianVaultPath
+        console.warn('[Settings] Stronghold failed for vault path:', e);
       }
+    }
+
+    // Persist confirmed model choice to per-provider cache (upstream)
+    if (updatedConfig.model) {
+      const map = JSON.parse(localStorage.getItem('providerModelMap') || '{}');
+      map[updatedConfig.provider] = updatedConfig.model;
+      localStorage.setItem('providerModelMap', JSON.stringify(map));
+    }
+
+    if (updateProviderApiKey && updatedConfig.apiKey && updatedConfig.provider !== 'custom-openai') {
+      updateProviderApiKey(updatedConfig.provider, updatedConfig.apiKey);
     }
 
     onSave(updatedConfig);
@@ -848,18 +961,29 @@ export function ModelSettingsModal({
                 // Clear error state when switching providers
                 setError('');
 
-                // Get safe default model
+                // Save current provider's model to localStorage before switching
+                const map = JSON.parse(localStorage.getItem('providerModelMap') || '{}');
+                if (modelConfig.model) {
+                  map[modelConfig.provider] = modelConfig.model;
+                  localStorage.setItem('providerModelMap', JSON.stringify(map));
+                }
+
+                // Try to restore cached model for the new provider
+                const savedModel = map[provider];
                 const providerModels = modelOptions[provider];
                 const defaultModel = providerModels && providerModels.length > 0
                   ? providerModels[0]
-                  : ''; // Fallback to empty string instead of undefined
+                  : '';
+                const model = (savedModel && providerModels?.includes(savedModel))
+                  ? savedModel
+                  : defaultModel;
 
                 setModelConfig({
                   ...modelConfig,
                   provider,
-                  model: defaultModel,
+                  model,
                 });
-                fetchApiKey(provider);
+                // API key is now synced automatically via useEffect watching providerApiKeys
 
                 // Load OpenRouter models only when OpenRouter is selected
                 if (provider === 'openrouter') {
@@ -907,29 +1031,61 @@ export function ModelSettingsModal({
             </Select>
 
             {modelConfig.provider !== 'builtin-ai' && modelConfig.provider !== 'custom-openai' && modelConfig.provider !== 'databricks' && (
-              <Select
-                value={modelConfig.model}
-                onValueChange={(value) =>
-                  setModelConfig((prev: ModelConfig) => ({ ...prev, model: value }))
-                }
-              >
-                <SelectTrigger className="flex-1">
-                  <SelectValue placeholder="Select model" />
-                </SelectTrigger>
-                <SelectContent className="max-h-48 overflow-y-auto">
-                  {modelConfig.provider === 'openrouter' && isLoadingOpenRouter ? (
-                    <SelectItem value="loading" disabled>
-                      Loading models...
-                    </SelectItem>
-                  ) : (
-                    modelOptions[modelConfig.provider]?.map((model) => (
-                      <SelectItem key={model} value={model}>
-                        {model}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+              <Popover open={modelComboboxOpen} onOpenChange={setModelComboboxOpen} modal={true}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={modelComboboxOpen}
+                    className="flex-1 max-w-[200px] justify-between font-normal"
+                  >
+                    <span className="truncate">
+                      {modelConfig.model || "Select model..."}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[250px] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search models..." />
+                    <CommandList className="max-h-[300px]">
+                      {(modelConfig.provider === 'openrouter' && isLoadingOpenRouter) ||
+                       (modelConfig.provider === 'openai' && isLoadingOpenAI) ||
+                       (modelConfig.provider === 'claude' && isLoadingClaude) ||
+                       (modelConfig.provider === 'groq' && isLoadingGroq) ? (
+                        <div className="py-6 text-center text-sm text-muted-foreground">
+                          <RefreshCw className="mx-auto h-4 w-4 animate-spin mb-2" />
+                          Loading models...
+                        </div>
+                      ) : (
+                        <>
+                          <CommandEmpty>No models found.</CommandEmpty>
+                          <CommandGroup>
+                            {modelOptions[modelConfig.provider]?.map((model) => (
+                              <CommandItem
+                                key={model}
+                                value={model}
+                                onSelect={(currentValue) => {
+                                  setModelConfig((prev: ModelConfig) => ({ ...prev, model: currentValue }));
+                                  setModelComboboxOpen(false);
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    modelConfig.model === model ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                <span className="truncate">{model}</span>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </>
+                      )}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             )}
           </div>
         </div>
