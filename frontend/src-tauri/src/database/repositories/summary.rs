@@ -47,13 +47,32 @@ impl SummaryProcessesRepository {
             return Ok(false);
         }
         let now = Utc::now();
+        let result_str = result_json.unwrap();
 
-        sqlx::query("UPDATE summary_processes SET result = ?, updated_at = ? WHERE meeting_id = ?")
-            .bind(&result_json.unwrap())
-            .bind(now)
+        // Update if row exists; otherwise insert (upsert) so manual edits always persist
+        let update_result = sqlx::query(
+            "UPDATE summary_processes SET result = ?, updated_at = ?, status = 'completed' WHERE meeting_id = ?",
+        )
+        .bind(&result_str)
+        .bind(now)
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+        if update_result.rows_affected() == 0 {
+            // No row yet - insert one so the summary persists
+            let now_str = now.to_rfc3339();
+            sqlx::query(
+                r#"INSERT INTO summary_processes (meeting_id, status, created_at, updated_at, result, error)
+                   VALUES (?, 'completed', ?, ?, ?, NULL)"#,
+            )
             .bind(meeting_id)
+            .bind(&now_str)
+            .bind(&now_str)
+            .bind(&result_str)
             .execute(&mut *transaction)
             .await?;
+        }
 
         sqlx::query("UPDATE meetings SET updated_at = ? WHERE id = ?")
             .bind(now)
@@ -74,12 +93,11 @@ impl SummaryProcessesRepository {
         pool: &SqlitePool,
         meeting_id: &str,
     ) -> Result<Option<SummaryProcess>, sqlx::Error> {
-        sqlx::query_as::<_, SummaryProcess>(
-            "SELECT p.* FROM summary_processes p JOIN transcript_chunks t ON p.meeting_id = t.meeting_id WHERE p.meeting_id = ?",
-        )
-        .bind(meeting_id)
-        .fetch_optional(pool)
-        .await
+        // Load by meeting_id only so saved edits persist even without transcript_chunks
+        sqlx::query_as::<_, SummaryProcess>("SELECT * FROM summary_processes WHERE meeting_id = ?")
+            .bind(meeting_id)
+            .fetch_optional(pool)
+            .await
     }
 
     pub async fn create_or_reset_process(

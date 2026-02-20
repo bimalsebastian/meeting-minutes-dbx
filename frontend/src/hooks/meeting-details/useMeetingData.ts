@@ -146,6 +146,9 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated, modelCo
         summary: formattedSummary,
       });
 
+      // Keep local state in sync so Obsidian and UI see the saved content
+      setAiSummary(formattedSummary as Summary);
+
       console.log('✅ Save meeting summary success');
     } catch (error) {
       console.error('❌ Failed to save meeting summary:', error);
@@ -165,43 +168,53 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated, modelCo
         await handleSaveMeetingTitle();
       }
 
-      // Save BlockNote editor changes if dirty
+      // Save BlockNote editor changes if dirty, or persist current aiSummary
+      let savedSummaryContent: string | null = null;
       if (blockNoteSummaryRef.current?.isDirty) {
         console.log('💾 Saving BlockNote editor changes...');
-        await blockNoteSummaryRef.current.saveSummary();
+        const savedMarkdown = await blockNoteSummaryRef.current.saveSummary();
+        savedSummaryContent = savedMarkdown?.trim() || null;
       } else if (aiSummary) {
         await handleSaveSummary(aiSummary);
+        if ('markdown' in aiSummary && typeof aiSummary.markdown === 'string') {
+          savedSummaryContent = aiSummary.markdown;
+        } else if ('summary_json' in aiSummary && aiSummary.summary_json) {
+          savedSummaryContent = JSON.stringify(aiSummary.summary_json, null, 2);
+        } else {
+          savedSummaryContent = JSON.stringify(aiSummary, null, 2);
+        }
       }
 
-      // Sync to Obsidian if vault configured and summary exists
+      // Sync to Obsidian: use content we just saved, or fetch from backend so vault always gets persisted content
       try {
         const vaultPath = (await secureRetrieve('obsidian_vault_path'))?.trim()
           || modelConfig.obsidianVaultPath?.trim()
           || '';
         
-        if (vaultPath && aiSummary) {
-          const token = (await secureRetrieve('databricks_token')) || '';
-          const meetingDate = meeting.created_at
-            ? new Date(meeting.created_at).toISOString().split('T')[0]
-            : new Date().toISOString().split('T')[0];
-          const meetingTitle = meeting.title || `Meeting ${meetingDate}`;
-          
-          // Extract summary text from various formats
-          let summaryText = '';
-          if ('markdown' in aiSummary && typeof aiSummary.markdown === 'string') {
-            summaryText = aiSummary.markdown;
-          } else if ('summary_json' in aiSummary && aiSummary.summary_json) {
-            summaryText = JSON.stringify(aiSummary.summary_json, null, 2);
-          } else {
-            summaryText = JSON.stringify(aiSummary, null, 2);
+        if (vaultPath) {
+          let contentForVault = savedSummaryContent;
+          if (!contentForVault?.trim()) {
+            try {
+              const res = await invokeTauri<{ data?: { markdown?: string; summary_json?: unknown } }>('api_get_summary', { meetingId: meeting.id });
+              const data = res?.data;
+              if (data?.markdown) contentForVault = data.markdown;
+              else if (data?.summary_json) contentForVault = JSON.stringify(data.summary_json, null, 2);
+              else if (data) contentForVault = JSON.stringify(data, null, 2);
+            } catch (e) {
+              console.warn('[Obsidian] Could not fetch summary for sync:', e);
+            }
           }
-          
-          if (summaryText) {
+          if (contentForVault?.trim()) {
+            const token = (await secureRetrieve('databricks_token')) || '';
+            const meetingDate = meeting.created_at
+              ? new Date(meeting.created_at).toISOString().split('T')[0]
+              : new Date().toISOString().split('T')[0];
+            const meetingTitle = meeting.title || `Meeting ${meetingDate}`;
             await syncMeetingToObsidian({
               meetingTitle,
               meetingDate,
               duration: 'Unknown',
-              summaryText,
+              summaryText: contentForVault,
               modelConfig,
               token,
               vaultPath,
@@ -211,7 +224,6 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated, modelCo
         }
       } catch (obsidianErr) {
         console.error('[Obsidian] Save sync failed (non-fatal):', obsidianErr);
-        // Never block meeting save on Obsidian failure
       }
 
       toast.success("Changes saved successfully");

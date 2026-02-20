@@ -285,15 +285,9 @@ export async function backfillMeetingsToObsidian(
     onProgress({ ...progress });
     
     try {
-      // Skip if note already exists in vault
-      const exists = await invoke<boolean>('obsidian_note_exists', {
-        vaultPath,
-        meetingDate: meeting.meetingDate,
-        meetingTitle: meeting.meetingTitle,
-      });
-      
-      if (exists) {
-        console.log('[Obsidian] Skipping (exists):', meeting.meetingTitle);
+      // Always sync (overwrite) so latest edits from summary_processes reach the vault
+      if (!meeting.summaryText?.trim()) {
+        console.log('[Obsidian] Skipping (no summary text):', meeting.meetingTitle);
         progress.skipped++;
         onProgress({ ...progress });
         continue;

@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use crate::state::AppState;
+use serde_json::Value;
 
 /// Sanitize meeting title for safe filename
 fn sanitize_title(title: &str) -> String {
@@ -92,6 +94,19 @@ pub async fn rename_obsidian_note(
     Ok(true)
 }
 
+/// Extract a single string from summary_processes.result JSON for Obsidian (prefer markdown).
+fn result_to_summary_text(result_json: &str) -> String {
+    let parsed: Value = match serde_json::from_str(result_json) {
+        Ok(v) => v,
+        Err(_) => return result_json.to_string(),
+    };
+    if let Some(markdown) = parsed.get("markdown").and_then(|v| v.as_str()) {
+        return markdown.to_string();
+    }
+    // Fallback: use raw JSON so vault at least gets the content
+    result_json.to_string()
+}
+
 #[tauri::command]
 pub async fn get_all_meetings_with_summaries(
     state: tauri::State<'_, AppState>,
@@ -100,45 +115,66 @@ pub async fn get_all_meetings_with_summaries(
     
     let pool = state.db_manager.pool();
     
-    // Query meetings and summaries tables
-    let rows = sqlx::query_as::<_, (String, String, String, Option<String>)>(
-        r#"
-        SELECT 
-            m.id,
-            m.title,
-            m.created_at,
-            s.summary_text
-        FROM meetings m
-        INNER JOIN summaries s ON s.meeting_id = m.id
-        ORDER BY m.created_at DESC
-        "#
+    // Prefer summary_processes (where in-app edits are saved); fallback to summaries table
+    let sp_rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT meeting_id, result FROM summary_processes WHERE result IS NOT NULL AND result != ''"
     )
     .fetch_all(pool)
     .await
-    .map_err(|e| format!("DB query failed: {}", e))?;
+    .map_err(|e| format!("DB query (summary_processes) failed: {}", e))?;
     
-    let result: Vec<serde_json::Value> = rows
-        .iter()
-        .map(|row| {
-            // Format date to YYYY-MM-DD from TEXT field (format: "2026-02-17T14:30:00Z")
-            let date_str = row.2
-                .split('T')
-                .next()
-                .unwrap_or("")
-                .to_string();
-            
-            serde_json::json!({
-                "meetingId": row.0.clone(),
-                "meetingTitle": row.1.clone(),
+    let sum_rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT meeting_id, summary_text FROM summaries"
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("DB query (summaries) failed: {}", e))?;
+    
+    let mut summary_text_by_meeting: HashMap<String, String> = HashMap::new();
+    for (meeting_id, summary_text) in sum_rows {
+        summary_text_by_meeting.entry(meeting_id).or_insert(summary_text);
+    }
+    for (meeting_id, result) in sp_rows {
+        summary_text_by_meeting.insert(meeting_id, result_to_summary_text(&result));
+    }
+    
+    let meeting_ids: Vec<String> = summary_text_by_meeting.keys().cloned().collect();
+    if meeting_ids.is_empty() {
+        println!("[Obsidian] No meetings with summaries");
+        return Ok(vec![]);
+    }
+    
+    let mut result = Vec::with_capacity(meeting_ids.len());
+    for id in &meeting_ids {
+        let row = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT id, title, created_at FROM meetings WHERE id = ?"
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("DB query (meetings) failed: {}", e))?;
+        
+        if let Some((mid, title, created_at)) = row {
+            let date_str = created_at.split('T').next().unwrap_or("").to_string();
+            let summary_text = summary_text_by_meeting.get(id).cloned().unwrap_or_default();
+            result.push(serde_json::json!({
+                "meetingId": mid,
+                "meetingTitle": title,
                 "meetingDate": if date_str.is_empty() {
                     chrono::Local::now().format("%Y-%m-%d").to_string()
                 } else {
                     date_str
                 },
-                "summaryText": row.3.clone().unwrap_or_default(),
-            })
-        })
-        .collect();
+                "summaryText": summary_text,
+            }));
+        }
+    }
+    
+    result.sort_by(|a, b| {
+        let a_date = a.get("meetingDate").and_then(|v| v.as_str()).unwrap_or("");
+        let b_date = b.get("meetingDate").and_then(|v| v.as_str()).unwrap_or("");
+        b_date.cmp(a_date)
+    });
     
     println!("[Obsidian] Found {} meetings with summaries", result.len());
     Ok(result)

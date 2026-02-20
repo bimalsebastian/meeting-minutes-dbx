@@ -47,8 +47,10 @@ if (platform === 'linux' && feature === 'cuda') {
   env.CMAKE_POSITION_INDEPENDENT_CODE = 'ON';
 }
 
-// Build the tauri command
+// Build the tauri command (--ci is a flag; only pass it in CI so local builds work)
+const isCI = process.env.CI === 'true' || process.env.CI === '1';
 let tauriCmd = `tauri ${command}`;
+if (isCI) tauriCmd += ' --ci';
 if (feature && feature !== 'none') {
   tauriCmd += ` -- --features ${feature}`;
   console.log(`🚀 Running: tauri ${command} with features: ${feature}`);

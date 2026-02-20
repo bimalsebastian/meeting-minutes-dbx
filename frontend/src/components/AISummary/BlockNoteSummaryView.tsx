@@ -28,7 +28,8 @@ interface BlockNoteSummaryViewProps {
 }
 
 export interface BlockNoteSummaryViewRef {
-  saveSummary: () => Promise<void>;
+  /** Saves to backend; resolves with the markdown that was saved (for Obsidian sync). */
+  saveSummary: () => Promise<string>;
   getMarkdown: () => Promise<string>;
   isDirty: boolean;
 }
@@ -132,26 +133,26 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
     }
   }, [isDirty, onDirtyChange]);
 
-  const handleSave = useCallback(async () => {
-    if (!onSave || !isDirty) return;
+  const handleSave = useCallback(async (): Promise<string> => {
+    if (!onSave || !isDirty) return '';
 
     setIsSaving(true);
     try {
       console.log('💾 Saving BlockNote content...');
 
-      // Generate markdown from current blocks
       const markdown = await editor.blocksToMarkdownLossy(currentBlocks);
-
-      onSave({
-        markdown: markdown,
+      const payload = {
+        markdown,
         summary_json: currentBlocks as unknown as BlockNoteBlock[]
-      });
-
+      };
+      await Promise.resolve(onSave(payload));
       setIsDirty(false);
       console.log('✅ Save successful');
+      return markdown;
     } catch (err) {
       console.error('❌ Save failed:', err);
       alert('Failed to save changes. Please try again.');
+      return '';
     } finally {
       setIsSaving(false);
     }
