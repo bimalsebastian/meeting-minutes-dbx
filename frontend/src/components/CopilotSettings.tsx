@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 
 interface CopilotSettingsState {
@@ -20,9 +21,8 @@ const DEFAULT_SETTINGS: CopilotSettingsState = {
 export function CopilotSettings() {
   const [settings, setSettings] = useState<CopilotSettingsState>(DEFAULT_SETTINGS);
   const [isSaving, setIsSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
-  // Load settings on mount
+  // Load all settings from backend on mount — no hardcoded defaults
   useEffect(() => {
     const loadSettings = async () => {
       try {
@@ -43,30 +43,33 @@ export function CopilotSettings() {
     loadSettings();
   }, []);
 
+  // Validation: enabled but no workspace host
+  const isInvalid = settings.copilotEnabled && !settings.databricksWorkspaceHost.trim();
+
   const handleSave = async () => {
+    if (isInvalid) return;
+
     setIsSaving(true);
-    setSaveMessage(null);
     try {
       const r = await fetch('http://localhost:5167/api/copilot/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          copilotEnabled: settings.copilotEnabled,
           databricksWorkspaceHost: settings.databricksWorkspaceHost || null,
           databricksCliProfile: settings.databricksCliProfile || 'DEFAULT',
+          copilotEnabled: settings.copilotEnabled,
           copilotIntervalMinutes: settings.copilotIntervalMinutes,
         }),
       });
       if (r.ok) {
-        setSaveMessage('Settings saved successfully.');
+        toast.success('Co-pilot settings saved');
       } else {
-        setSaveMessage('Failed to save settings.');
+        toast.error('Failed to save settings');
       }
     } catch (e) {
-      setSaveMessage('Error saving settings. Is the backend running?');
+      toast.error('Error saving settings. Is the backend running?');
     } finally {
       setIsSaving(false);
-      setTimeout(() => setSaveMessage(null), 3000);
     }
   };
 
@@ -105,74 +108,79 @@ export function CopilotSettings() {
         </label>
       </div>
 
-      {/* Conditional fields shown when enabled */}
-      {settings.copilotEnabled && (
-        <div className="space-y-4 pl-2 border-l-2 border-blue-200">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Databricks Workspace Host
-              <span className="text-gray-400 font-normal ml-1">(optional — required for Genie grounding)</span>
-            </label>
-            <input
-              type="text"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="https://adb-1234567890.azuredatabricks.net"
-              value={settings.databricksWorkspaceHost}
-              onChange={e => setSettings(s => ({ ...s, databricksWorkspaceHost: e.target.value }))}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Databricks CLI Profile
-            </label>
-            <input
-              type="text"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="DEFAULT"
-              value={settings.databricksCliProfile}
-              onChange={e => setSettings(s => ({ ...s, databricksCliProfile: e.target.value }))}
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              Profile name from your ~/.databrickscfg file.
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Analysis interval (minutes)
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={30}
-              className="w-32 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              value={settings.copilotIntervalMinutes}
-              onChange={e => setSettings(s => ({ ...s, copilotIntervalMinutes: Math.max(1, Math.min(30, parseInt(e.target.value) || 5)) }))}
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              How often the co-pilot analyses the transcript (1&ndash;30 minutes).
-            </p>
-          </div>
-
-          <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
-            <p className="text-xs text-blue-700">
-              <strong>Note:</strong> The co-pilot uses your configured Summary Model provider and
-              model. Configure the provider in the Summary tab.
-            </p>
-          </div>
-        </div>
+      {/* Validation warning — shown when enabled but no workspace host */}
+      {isInvalid && (
+        <p className="text-xs text-amber-600 mt-1">
+          Workspace host required to enable Co-pilot
+        </p>
       )}
 
+      {/* Configuration fields — always visible */}
+      <div className="space-y-4 pl-2 border-l-2 border-blue-200">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Databricks Workspace Host
+            <span className="text-gray-400 font-normal ml-1">(required to enable Co-pilot)</span>
+          </label>
+          <input
+            type="url"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="https://adb-xxxx.azuredatabricks.net"
+            value={settings.databricksWorkspaceHost}
+            onChange={e => setSettings(s => ({ ...s, databricksWorkspaceHost: e.target.value }))}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Databricks CLI Profile
+          </label>
+          <input
+            type="text"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="DEFAULT"
+            value={settings.databricksCliProfile}
+            onChange={e => setSettings(s => ({ ...s, databricksCliProfile: e.target.value }))}
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            Profile name from your ~/.databrickscfg file.
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Analyse every N minutes
+          </label>
+          <input
+            type="number"
+            min={1}
+            max={30}
+            className="w-32 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={settings.copilotIntervalMinutes}
+            onChange={e =>
+              setSettings(s => ({
+                ...s,
+                copilotIntervalMinutes: Math.max(1, Math.min(30, parseInt(e.target.value) || 5)),
+              }))
+            }
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            How often the co-pilot analyses the transcript (1&ndash;30 minutes).
+          </p>
+        </div>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+          <p className="text-xs text-blue-700">
+            <strong>Note:</strong> The co-pilot uses your configured Summary Model provider and
+            model. Configure the provider in the Summary tab.
+          </p>
+        </div>
+      </div>
+
       <div className="flex items-center gap-4">
-        <Button onClick={handleSave} disabled={isSaving}>
+        <Button onClick={handleSave} disabled={isSaving || isInvalid}>
           {isSaving ? 'Saving...' : 'Save Settings'}
         </Button>
-        {saveMessage && (
-          <span className={`text-sm ${saveMessage.includes('successfully') ? 'text-green-600' : 'text-red-600'}`}>
-            {saveMessage}
-          </span>
-        )}
       </div>
     </div>
   );
