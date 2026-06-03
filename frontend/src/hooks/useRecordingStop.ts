@@ -240,10 +240,22 @@ export function useRecordingStop(
         const folderPath = sessionStorage.getItem('last_recording_folder_path');
         const savedMeetingName = sessionStorage.getItem('last_recording_meeting_name');
 
+        // Retrieve the Rust-generated meeting UUID so the DB record uses the same ID
+        // as the clipboard attachment records (which were POSTed to /api/meetings/{uuid}/attachments)
+        let rustMeetingId: string | null = null;
+        try {
+          const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
+          rustMeetingId = await tauriInvoke<string | null>('get_current_meeting_id');
+          console.log('🔑 Rust meeting UUID for save:', rustMeetingId);
+        } catch (err) {
+          console.warn('Could not retrieve Rust meeting UUID, will generate new ID:', err);
+        }
+
         console.log('💾 Saving COMPLETE transcripts to database...', {
           transcript_count: freshTranscripts.length,
           meeting_name: savedMeetingName || meetingTitle,
           folder_path: folderPath,
+          rust_meeting_id: rustMeetingId,
           sample_text: freshTranscripts.length > 0 ? freshTranscripts[0].text.substring(0, 50) + '...' : 'none',
           last_transcript: freshTranscripts.length > 0 ? freshTranscripts[freshTranscripts.length - 1].text.substring(0, 30) + '...' : 'none',
         });
@@ -252,7 +264,8 @@ export function useRecordingStop(
           const responseData = await storageService.saveMeeting(
             savedMeetingName || meetingTitle || 'New Meeting',  // PREFER savedMeetingName (backend source)
             freshTranscripts,
-            folderPath
+            folderPath,
+            rustMeetingId
           );
 
           const meetingId = responseData.meeting_id;
