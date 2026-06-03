@@ -261,8 +261,6 @@ fn rgba_to_png(rgba: &[u8], width: u32, height: u32) -> anyhow::Result<Vec<u8>> 
     // We implement a minimal PNG encoder (no external crate).
     // PNG spec: signature + IHDR + IDAT(zlib-deflated filtered rows) + IEND
 
-    use std::io::Write;
-
     // --- helpers ---
     fn crc32(data: &[u8]) -> u32 {
         // CRC-32 as required by PNG

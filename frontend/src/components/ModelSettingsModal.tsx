@@ -750,6 +750,7 @@ export function ModelSettingsModal({
         } catch (e) {
           console.warn('[Settings] Stronghold failed for endpoint:', e);
         }
+      }
     }
 
     // Save Obsidian vault path to Stronghold

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import { RecordingControls } from '@/components/RecordingControls';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -12,9 +13,6 @@ import { StatusOverlays } from '@/app/_components/StatusOverlays';
 import Analytics from '@/lib/analytics';
 import { SettingsModals } from './_components/SettingsModal';
 import { TranscriptPanel } from './_components/TranscriptPanel';
-import { AttachmentsPanel } from './_components/AttachmentsPanel';
-import CopilotSidebar from './_components/CopilotSidebar';
-import { FeatureErrorBoundary } from '@/components/FeatureErrorBoundary';
 import { useModalState } from '@/hooks/useModalState';
 import { useRecordingStateSync } from '@/hooks/useRecordingStateSync';
 import { useRecordingStart } from '@/hooks/useRecordingStart';
@@ -25,8 +23,13 @@ import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { useCalendarPolling } from '@/hooks/useCalendarPolling';
-import CalendarSplitBanner from '@/components/CalendarSplitBanner';
-import { RecallBanner } from '@/components/RecallBanner';
+
+// Load new feature panels dynamically — isolates any module-level error to
+// that panel's chunk and prevents it from breaking the main page bundle.
+const AttachmentsPanel = dynamic(() => import('./_components/AttachmentsPanel').then(m => m.AttachmentsPanel), { ssr: false });
+const CopilotSidebar   = dynamic(() => import('./_components/CopilotSidebar'), { ssr: false });
+const CalendarSplitBanner = dynamic(() => import('@/components/CalendarSplitBanner'), { ssr: false });
+const RecallBanner     = dynamic(() => import('@/components/RecallBanner').then(m => ({ default: m.RecallBanner })), { ssr: false });
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -255,7 +258,7 @@ export default function Home() {
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col h-screen bg-gray-50"
     >
-      <FeatureErrorBoundary name="RecallBanner"><RecallBanner /></FeatureErrorBoundary>
+      <RecallBanner />
       {/* All Modals supported*/}
       <SettingsModals
         modals={modals}
@@ -275,13 +278,11 @@ export default function Home() {
       <div className="flex flex-1 overflow-hidden" style={{ flexDirection: 'column' }}>
         {/* Calendar auto-split banner — shown when a meeting ends during recording */}
         {recordingState.isRecording && (
-          <FeatureErrorBoundary name="CalendarSplitBanner">
-            <CalendarSplitBanner
-              state={calendarState}
-              onSplitNow={handleCalendarSplitNow}
-              onKeepRecording={handleKeepRecording}
-            />
-          </FeatureErrorBoundary>
+          <CalendarSplitBanner
+            state={calendarState}
+            onSplitNow={handleCalendarSplitNow}
+            onKeepRecording={handleKeepRecording}
+          />
         )}
         <div className="flex flex-1 overflow-hidden">
         <TranscriptPanel
@@ -289,21 +290,17 @@ export default function Home() {
           isStopping={isStopping}
           showModal={showModal}
         />
-        <FeatureErrorBoundary name="AttachmentsPanel">
-          <AttachmentsPanel
-            meetingId={currentMeetingId}
-            isRecording={recordingState.isRecording}
-          />
-        </FeatureErrorBoundary>
+        <AttachmentsPanel
+          meetingId={currentMeetingId}
+          isRecording={recordingState.isRecording}
+        />
 
         {/* Live SA Co-pilot Sidebar */}
-        <FeatureErrorBoundary name="CopilotSidebar">
-          <CopilotSidebar
-            meetingId={currentMeetingId}
-            isRecording={recordingState.isRecording}
-            isEnabled={copilotEnabled}
-          />
-        </FeatureErrorBoundary>
+        <CopilotSidebar
+          meetingId={currentMeetingId}
+          isRecording={recordingState.isRecording}
+          isEnabled={copilotEnabled}
+        />
 
         </div>{/* end inner flex */}
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}

@@ -38,19 +38,10 @@ pub mod summary_engine;
 pub mod template_commands;
 pub mod templates;
 
-// Re-export Tauri commands (with their generated __cmd__ variants)
-pub use commands::{
-    __cmd__api_cancel_summary, __cmd__api_get_summary, __cmd__api_process_transcript,
-    __cmd__api_save_meeting_summary, __cmd__get_meeting_summary, __cmd__save_meeting_summary,
-    api_cancel_summary, api_get_summary, api_process_transcript, api_save_meeting_summary,
-    get_meeting_summary, save_meeting_summary,
-};
-
-// Re-export template commands
-pub use template_commands::{
-    __cmd__api_get_template_details, __cmd__api_list_templates, __cmd__api_validate_template,
-    api_get_template_details, api_list_templates, api_validate_template,
-};
+// Re-export Tauri commands — glob picks up both __cmd__* (Tauri <2.7) and
+// __tauri_command_name_* (Tauri ≥2.7) without needing explicit per-version lists.
+pub use commands::*;
+pub use template_commands::*;
 
 // Re-export commonly used items
 pub use llm_client::LLMProvider;
