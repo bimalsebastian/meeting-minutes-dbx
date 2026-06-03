@@ -21,6 +21,8 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { useCalendarPolling } from '@/hooks/useCalendarPolling';
+import CalendarSplitBanner from '@/components/CalendarSplitBanner';
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -29,7 +31,7 @@ export default function Home() {
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
 
   // Use contexts for state management
-  const { meetingTitle } = useTranscripts();
+  const { meetingTitle, setMeetingTitle, clearTranscripts } = useTranscripts();
   const { transcriptModelConfig, selectedDevices } = useConfig();
   const recordingState = useRecordingState();
 
@@ -49,6 +51,9 @@ export default function Home() {
     setIsRecordingDisabled
   );
 
+  // Calendar polling for auto-split feature
+  const calendarState = useCalendarPolling();
+
   // Recovery hook
   const {
     recoverableMeetings,
@@ -61,6 +66,47 @@ export default function Home() {
   } = useTranscriptRecovery();
 
   const router = useRouter();
+
+  // Handle "Split Now" from the calendar banner: stop current recording (no navigation),
+  // acknowledge the split, then start a new recording with the next event title.
+  const handleCalendarSplitNow = async () => {
+    // Capture next event title before stopping (state may change)
+    const nextTitle = calendarState.nextEventTitle;
+
+    // Stop the current recording without navigating away
+    await handleRecordingStop(true, { skipNavigation: true });
+    await new Promise(r => setTimeout(r, 500));
+
+    // Tell the backend the split was handled
+    try {
+      await fetch('http://localhost:5167/api/calendar/acknowledge_split', { method: 'POST' });
+    } catch {
+      // ignore — best effort
+    }
+
+    // Start a fresh recording named after the next calendar event
+    if (nextTitle) {
+      try {
+        setMeetingTitle(nextTitle);
+        clearTranscripts();
+        await handleRecordingStart();
+        console.log('[CalendarSplit] Started new recording for:', nextTitle);
+      } catch (err) {
+        console.error('[CalendarSplit] Failed to start new recording:', err);
+      }
+    }
+  };
+
+  // Dismiss the split banner for this event
+  const handleKeepRecording = () => {
+    if (calendarState.nextEventId) {
+      fetch('http://localhost:5167/api/calendar/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event_id: calendarState.nextEventId }),
+      }).catch(() => {});
+    }
+  };
 
   useEffect(() => {
     // Track page view
@@ -212,13 +258,23 @@ export default function Home() {
         onDelete={deleteRecoverableMeeting}
         onLoadPreview={loadMeetingTranscripts}
       />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden" style={{ flexDirection: 'column' }}>
+        {/* Calendar auto-split banner — shown when a meeting ends during recording */}
+        {recordingState.isRecording && (
+          <CalendarSplitBanner
+            state={calendarState}
+            onSplitNow={handleCalendarSplitNow}
+            onKeepRecording={handleKeepRecording}
+          />
+        )}
+        <div className="flex flex-1 overflow-hidden">
         <TranscriptPanel
           isProcessingStop={isProcessingStop}
           isStopping={isStopping}
           showModal={showModal}
         />
 
+        </div>{/* end inner flex */}
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
         {(hasMicrophone || isRecording) &&
           status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
