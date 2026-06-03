@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
 import { ModelConfig } from '@/components/ModelSettingsModal';
+import { AttachmentsPanel } from '@/app/_components/AttachmentsPanel';
 
 // Custom hooks
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
@@ -186,6 +187,7 @@ export default function PageContent({
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
         />
+        <AttachmentsPanel meetingId={meeting.id} isRecording={false} />
         <SummaryPanel
           meeting={meeting}
           meetingTitle={meetingData.meetingTitle}

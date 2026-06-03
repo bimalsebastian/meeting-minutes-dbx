@@ -264,16 +264,18 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // Start clipboard monitor for screenshot attachment capture
     {
         let meeting_uuid = uuid::Uuid::new_v4().to_string();
+        info!("🆔 Generated meeting UUID for clipboard attachments: {}", meeting_uuid);
         let base_folder = super::recording_preferences::get_default_recordings_folder();
         let folder_path = base_folder.join(&meeting_uuid);
         std::fs::create_dir_all(&folder_path).ok();
 
-        // Store meeting ID so stop_recording can retrieve it
+        // Store meeting ID so stop_recording and get_current_meeting_id can retrieve it
         {
             let mut mid = CURRENT_MEETING_ID.lock().unwrap();
             *mid = Some(meeting_uuid.clone());
         }
 
+        info!("🔍 Calling start_monitor with meeting UUID: {}", meeting_uuid);
         crate::clipboard_monitor::start_monitor(app.clone(), meeting_uuid, folder_path);
     }
 
@@ -448,16 +450,18 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Start clipboard monitor for screenshot attachment capture
     {
         let meeting_uuid = uuid::Uuid::new_v4().to_string();
+        info!("🆔 Generated meeting UUID for clipboard attachments: {}", meeting_uuid);
         let base_folder = super::recording_preferences::get_default_recordings_folder();
         let folder_path = base_folder.join(&meeting_uuid);
         std::fs::create_dir_all(&folder_path).ok();
 
-        // Store meeting ID so stop_recording can retrieve it
+        // Store meeting ID so stop_recording and get_current_meeting_id can retrieve it
         {
             let mut mid = CURRENT_MEETING_ID.lock().unwrap();
             *mid = Some(meeting_uuid.clone());
         }
 
+        info!("🔍 Calling start_monitor with meeting UUID: {}", meeting_uuid);
         crate::clipboard_monitor::start_monitor(app.clone(), meeting_uuid, folder_path);
     }
 
@@ -1097,6 +1101,20 @@ pub async fn get_recording_meeting_name() -> Result<Option<String>, String> {
     } else {
         Ok(None)
     }
+}
+
+/// Get the current meeting UUID generated at recording start
+/// Used by the frontend to thread the same UUID into the save-transcript call so
+/// the SQLite meeting record shares the same ID as the clipboard attachment records.
+#[tauri::command]
+pub async fn get_current_meeting_id() -> Option<String> {
+    let mid = CURRENT_MEETING_ID.lock().unwrap();
+    let id = mid.as_deref().map(String::from);
+    info!(
+        "get_current_meeting_id called — returning: {:?}",
+        id
+    );
+    id
 }
 
 // ============================================================================

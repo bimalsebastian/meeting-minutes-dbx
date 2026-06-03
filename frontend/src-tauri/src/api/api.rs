@@ -955,12 +955,14 @@ pub async fn api_save_transcript<R: Runtime>(
     transcripts: Vec<serde_json::Value>,
     folder_path: Option<String>,
     auth_token: Option<String>,
+    meeting_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_save_transcript called for meeting: {}, transcripts: {}, folder_path: {:?}, auth_token: {}",
+        "api_save_transcript called for meeting: {}, transcripts: {}, folder_path: {:?}, provided_meeting_id: {:?}, auth_token: {}",
         meeting_title,
         transcripts.len(),
         folder_path,
+        meeting_id,
         auth_token.is_some()
     );
 
@@ -994,23 +996,25 @@ pub async fn api_save_transcript<R: Runtime>(
     let pool = state.db_manager.pool();
 
     // Now, call the repository with the correctly typed data.
+    // Pass the provided meeting_id so the DB record uses the same UUID as the clipboard attachments.
     match TranscriptsRepository::save_transcript(
         pool,
         &meeting_title,
         &transcripts_to_save,
         folder_path,
+        meeting_id,
     )
     .await
     {
-        Ok(meeting_id) => {
+        Ok(saved_meeting_id) => {
             log_info!(
                 "Successfully saved transcript and created meeting with id: {}",
-                meeting_id
+                saved_meeting_id
             );
             Ok(serde_json::json!({
                 "status": "success",
                 "message": "Transcript saved successfully",
-                "meeting_id": meeting_id
+                "meeting_id": saved_meeting_id
             }))
         }
         Err(e) => {

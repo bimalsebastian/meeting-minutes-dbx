@@ -15,8 +15,11 @@ impl TranscriptsRepository {
         meeting_title: &str,
         transcripts: &[TranscriptSegment],
         folder_path: Option<String>,
+        provided_meeting_id: Option<String>,
     ) -> Result<String, SqlxError> {
-        let meeting_id = format!("meeting-{}", Uuid::new_v4());
+        // Use the provided meeting ID (from clipboard monitor UUID) if available so that
+        // attachment records already stored under that ID are correlated with this meeting.
+        let meeting_id = provided_meeting_id.unwrap_or_else(|| format!("meeting-{}", Uuid::new_v4()));
 
         let mut conn = pool.acquire().await?;
         let mut transaction = conn.begin().await?;
