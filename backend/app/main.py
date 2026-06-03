@@ -110,6 +110,26 @@ class TranscriptRequest(BaseModel):
     overlap: Optional[int] = 1000
     custom_prompt: Optional[str] = "Generate a summary of the meeting transcript."
 
+# Copilot Pydantic models
+class CopilotHint(BaseModel):
+    id: str
+    meeting_id: str
+    created_at: str
+    topic_detected: str
+    talking_points: List[str]
+    genie_used: bool
+    genie_answer: Optional[str] = None
+
+class CopilotRecordingSignal(BaseModel):
+    action: str   # "start" or "stop"
+    meeting_id: str
+
+class SaveCopilotSettingsRequest(BaseModel):
+    databricksWorkspaceHost: Optional[str] = None
+    databricksCliProfile: str = "DEFAULT"
+    copilotEnabled: bool = False
+    copilotIntervalMinutes: int = 5
+
 class SummaryProcessor:
     """Handles the processing of summaries in a thread-safe way"""
     def __init__(self):
@@ -170,6 +190,7 @@ class SummaryProcessor:
 
 # Initialize processor
 processor = SummaryProcessor()
+
 
 # New meeting management endpoints
 @app.get("/get-meetings", response_model=List[MeetingResponse])
@@ -670,13 +691,16 @@ async def search_transcripts(request: SearchRequest):
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize calendar and recall modules on startup."""
-    import asyncio
+    """Initialize calendar, recall, and co-pilot modules on startup."""
+    import asyncio, os
     from recall import recall_polling_loop
+    from copilot import start_copilot_scheduler
     init_calendar(db)
     asyncio.create_task(calendar_polling_loop(db))
     asyncio.create_task(recall_polling_loop(db))
-    logger.info("Calendar and recall modules initialized")
+    kb_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'copilot-knowledge', 'databricks-sa-context.md'))
+    await start_copilot_scheduler(db, kb_path)
+    logger.info("Calendar, recall, and co-pilot modules initialized")
 
 
 @app.get("/api/recall/brief/{event_id}", response_model=RecallBriefResponse)
@@ -756,6 +780,45 @@ async def delete_attachment(meeting_id: str, attachment_id: str):
         logger.error(f"Error deleting attachment: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/api/copilot/hints/{meeting_id}")
+async def get_copilot_hints(meeting_id: str):
+    """Get all copilot hints for a meeting"""
+    hints = await db.get_copilot_hints(meeting_id)
+    return {"hints": hints}
+
+
+@app.post("/api/copilot/recording-signal")
+async def copilot_recording_signal(signal: CopilotRecordingSignal):
+    """Signal recording start or stop to the co-pilot backend"""
+    from copilot import set_recording_active, set_recording_stopped
+    settings = await db.get_copilot_settings()
+    interval = settings.get('copilotIntervalMinutes', 5)
+    if signal.action == "start" and signal.meeting_id:
+        set_recording_active(signal.meeting_id, interval)
+    else:
+        set_recording_stopped()
+    return {"status": "ok"}
+
+
+@app.get("/api/copilot/settings")
+async def get_copilot_settings():
+    """Get copilot settings (API keys excluded)"""
+    settings = await db.get_copilot_settings()
+    safe = {k: v for k, v in settings.items() if 'ApiKey' not in k and 'api_key' not in k}
+    return safe
+
+
+@app.post("/api/copilot/settings")
+async def save_copilot_settings(request: SaveCopilotSettingsRequest):
+    """Save copilot settings"""
+    await db.save_copilot_settings(
+        request.databricksWorkspaceHost,
+        request.databricksCliProfile,
+        request.copilotEnabled,
+        request.copilotIntervalMinutes
+    )
+    return {"status": "success"}
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on API shutdown"""

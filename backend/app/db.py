@@ -1,6 +1,7 @@
 import aiosqlite
 import json
 import os
+import uuid
 from datetime import datetime
 from typing import Optional, Dict
 import logging
@@ -203,11 +204,32 @@ class DatabaseManager:
                 )
             """)
 
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS copilot_hints (
+                    id TEXT PRIMARY KEY,
+                    meeting_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    topic_detected TEXT NOT NULL,
+                    talking_points TEXT NOT NULL,
+                    genie_used INTEGER NOT NULL DEFAULT 0,
+                    genie_answer TEXT,
+                    FOREIGN KEY (meeting_id) REFERENCES meetings(id)
+                )
+            """)
+
             # Migrations
             try:
                 cursor.execute("ALTER TABLE settings ADD COLUMN recall_enabled INTEGER DEFAULT 1")
             except sqlite3.OperationalError:
                 pass
+            try: cursor.execute("ALTER TABLE settings ADD COLUMN databricksWorkspaceHost TEXT")
+            except sqlite3.OperationalError: pass
+            try: cursor.execute("ALTER TABLE settings ADD COLUMN databricksCliProfile TEXT DEFAULT 'DEFAULT'")
+            except sqlite3.OperationalError: pass
+            try: cursor.execute("ALTER TABLE settings ADD COLUMN copilotEnabled INTEGER DEFAULT 0")
+            except sqlite3.OperationalError: pass
+            try: cursor.execute("ALTER TABLE settings ADD COLUMN copilotIntervalMinutes INTEGER DEFAULT 5")
+            except sqlite3.OperationalError: pass
 
             conn.commit()
 
@@ -558,6 +580,9 @@ class DatabaseManager:
                     
                     # Delete from transcripts
                     await conn.execute("DELETE FROM transcripts WHERE meeting_id = ?", (meeting_id,))
+
+                    # Delete from copilot_hints
+                    await conn.execute("DELETE FROM copilot_hints WHERE meeting_id = ?", (meeting_id,))
                     
                     # Delete from meetings
                     cursor = await conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
@@ -1123,30 +1148,22 @@ class DatabaseManager:
 
     async def search_meetings_by_attendees(self, name_tokens: list) -> list:
         """Dynamic LIKE search across transcripts and transcript_chunks. Skips tokens < 4 chars."""
-        conditions = []
-        params = []
+        conditions, params = [], []
         for token in name_tokens:
             if len(token) < 4:
                 continue
-            token_lower = f"%{token.lower()}%"
             conditions.append("LOWER(t.transcript) LIKE ?")
-            params.append(token_lower)
-
+            params.append(f"%{token.lower()}%")
         if not conditions:
             return []
-
         where_clause = " OR ".join(conditions)
-        chunk_where_clause = " OR ".join(
-            c.replace("t.transcript", "tc.transcript_text") for c in conditions
-        )
+        chunk_where = " OR ".join(c.replace("t.transcript", "tc.transcript_text") for c in conditions)
         query = f"""
             SELECT DISTINCT m.id as meeting_id, m.title, m.created_at
-            FROM meetings m JOIN transcripts t ON m.id = t.meeting_id
-            WHERE {where_clause}
+            FROM meetings m JOIN transcripts t ON m.id = t.meeting_id WHERE {where_clause}
             UNION
             SELECT DISTINCT m.id as meeting_id, m.title, m.created_at
-            FROM meetings m JOIN transcript_chunks tc ON m.id = tc.meeting_id
-            WHERE {chunk_where_clause}
+            FROM meetings m JOIN transcript_chunks tc ON m.id = tc.meeting_id WHERE {chunk_where}
             ORDER BY created_at DESC LIMIT 20
         """
         try:
@@ -1212,8 +1229,7 @@ class DatabaseManager:
                     cursor = await conn.execute("SELECT id FROM settings WHERE id = '1'")
                     existing = await cursor.fetchone()
                     if existing:
-                        await conn.execute(
-                            "UPDATE settings SET recall_enabled = ? WHERE id = '1'", (value,))
+                        await conn.execute("UPDATE settings SET recall_enabled = ? WHERE id = '1'", (value,))
                     else:
                         await conn.execute(
                             "INSERT INTO settings (id, provider, model, whisperModel, recall_enabled) VALUES (?, ?, ?, ?, ?)",
@@ -1274,8 +1290,7 @@ class DatabaseManager:
             async with self._get_connection() as conn:
                 await conn.execute("BEGIN TRANSACTION")
                 try:
-                    cursor = await conn.execute(
-                        "DELETE FROM attachments WHERE id = ?", (attachment_id,))
+                    cursor = await conn.execute("DELETE FROM attachments WHERE id = ?", (attachment_id,))
                     deleted = cursor.rowcount > 0
                     await conn.commit()
                     if deleted:
@@ -1291,3 +1306,148 @@ class DatabaseManager:
             logger.error(f"Database connection error in delete_attachment: {str(e)}", exc_info=True)
             raise
 
+    async def save_copilot_hint(self, meeting_id: str, topic_detected: str, talking_points: list,
+                                 genie_used: bool, genie_answer: Optional[str]) -> str:
+        """Insert a copilot hint. Returns the new hint id."""
+        hint_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+        points_json = json.dumps(talking_points)
+        try:
+            async with self._get_connection() as conn:
+                await conn.execute("BEGIN TRANSACTION")
+                try:
+                    await conn.execute(
+                        """INSERT INTO copilot_hints (id, meeting_id, created_at, topic_detected, talking_points, genie_used, genie_answer)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        (hint_id, meeting_id, now, topic_detected, points_json, 1 if genie_used else 0, genie_answer)
+                    )
+                    await conn.commit()
+                    logger.info(f"Saved copilot hint {hint_id} for meeting {meeting_id}")
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error(f"Failed to save copilot hint: {str(e)}", exc_info=True)
+                    raise
+        except Exception as e:
+            logger.error(f"Database connection error in save_copilot_hint: {str(e)}", exc_info=True)
+            raise
+        return hint_id
+
+    async def get_copilot_hints(self, meeting_id: str) -> list:
+        """Return hints for meeting, newest first. talking_points is list (deserialized from JSON)."""
+        try:
+            async with self._get_connection() as conn:
+                cursor = await conn.execute("""
+                    SELECT id, meeting_id, created_at, topic_detected, talking_points, genie_used, genie_answer
+                    FROM copilot_hints
+                    WHERE meeting_id = ?
+                    ORDER BY created_at DESC
+                """, (meeting_id,))
+                rows = await cursor.fetchall()
+                results = []
+                for row in rows:
+                    results.append({
+                        'id': row[0],
+                        'meeting_id': row[1],
+                        'created_at': row[2],
+                        'topic_detected': row[3],
+                        'talking_points': json.loads(row[4]) if row[4] else [],
+                        'genie_used': bool(row[5]),
+                        'genie_answer': row[6]
+                    })
+                return results
+        except Exception as e:
+            logger.error(f"Error getting copilot hints: {str(e)}")
+            raise
+
+    async def get_copilot_settings(self) -> dict:
+        """Read copilot + LLM settings from settings row id='1'.
+        Returns defaults if row doesn't exist."""
+        defaults = {
+            'copilotEnabled': False,
+            'copilotIntervalMinutes': 5,
+            'databricksCliProfile': 'DEFAULT',
+            'databricksWorkspaceHost': None,
+            'provider': None,
+            'model': None,
+            'anthropicApiKey': None,
+            'openaiApiKey': None,
+            'groqApiKey': None,
+            'ollamaApiKey': None,
+        }
+        try:
+            async with self._get_connection() as conn:
+                cursor = await conn.execute("""
+                    SELECT provider, model, copilotEnabled, copilotIntervalMinutes,
+                           databricksCliProfile, databricksWorkspaceHost,
+                           anthropicApiKey, openaiApiKey, groqApiKey, ollamaApiKey
+                    FROM settings WHERE id = '1'
+                """)
+                row = await cursor.fetchone()
+                if not row:
+                    return defaults
+                return {
+                    'provider': row[0],
+                    'model': row[1],
+                    'copilotEnabled': bool(row[2]) if row[2] is not None else False,
+                    'copilotIntervalMinutes': row[3] if row[3] is not None else 5,
+                    'databricksCliProfile': row[4] if row[4] else 'DEFAULT',
+                    'databricksWorkspaceHost': row[5],
+                    'anthropicApiKey': row[6],
+                    'openaiApiKey': row[7],
+                    'groqApiKey': row[8],
+                    'ollamaApiKey': row[9],
+                }
+        except Exception as e:
+            logger.error(f"Error getting copilot settings: {str(e)}")
+            return defaults
+
+    async def save_copilot_settings(self, databricks_workspace_host: Optional[str], databricks_cli_profile: str, copilot_enabled: bool, copilot_interval_minutes: int) -> None:
+        """Upsert copilot settings fields in settings row id='1'."""
+        try:
+            async with self._get_connection() as conn:
+                await conn.execute("BEGIN TRANSACTION")
+                try:
+                    cursor = await conn.execute("SELECT id FROM settings WHERE id = '1'")
+                    existing = await cursor.fetchone()
+                    if existing:
+                        await conn.execute("""
+                            UPDATE settings
+                            SET databricksWorkspaceHost = ?,
+                                databricksCliProfile = ?,
+                                copilotEnabled = ?,
+                                copilotIntervalMinutes = ?
+                            WHERE id = '1'
+                        """, (databricks_workspace_host, databricks_cli_profile, 1 if copilot_enabled else 0, copilot_interval_minutes))
+                    else:
+                        await conn.execute("""
+                            INSERT INTO settings (id, provider, model, whisperModel, databricksWorkspaceHost, databricksCliProfile, copilotEnabled, copilotIntervalMinutes)
+                            VALUES ('1', 'ollama', 'llama3.2', 'large-v3', ?, ?, ?, ?)
+                        """, (databricks_workspace_host, databricks_cli_profile, 1 if copilot_enabled else 0, copilot_interval_minutes))
+                    await conn.commit()
+                    logger.info("Saved copilot settings")
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error(f"Failed to save copilot settings: {str(e)}", exc_info=True)
+                    raise
+        except Exception as e:
+            logger.error(f"Database connection error in save_copilot_settings: {str(e)}", exc_info=True)
+            raise
+
+    async def get_recent_transcripts(self, meeting_id: str, since_iso: str) -> str:
+        """Fetch transcript rows WHERE meeting_id=? AND timestamp >= ? ORDER BY timestamp ASC.
+        Return concatenated transcript text with newlines. Return '' if none."""
+        try:
+            async with self._get_connection() as conn:
+                cursor = await conn.execute("""
+                    SELECT transcript
+                    FROM transcripts
+                    WHERE meeting_id = ? AND timestamp >= ?
+                    ORDER BY timestamp ASC
+                """, (meeting_id, since_iso))
+                rows = await cursor.fetchall()
+                if not rows:
+                    return ''
+                return '\n'.join(row[0] for row in rows if row[0])
+        except Exception as e:
+            logger.error(f"Error getting recent transcripts: {str(e)}")
+            return ''

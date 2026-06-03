@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, CalendarIcon } from 'lucide-react';
+import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, CalendarIcon, BotIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { motion } from 'framer-motion';
@@ -10,6 +10,7 @@ import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import CalendarSettings from '@/components/CalendarSettings';
+import { CopilotSettings } from '@/components/CopilotSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
@@ -19,7 +20,8 @@ const TABS = [
   { value: 'recording', label: 'Recordings', icon: Mic },
   { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
   { value: 'summaryModels', label: 'Summary', icon: SparkleIcon },
-  { value: 'calendar', label: 'Calendar', icon: CalendarIcon }
+  { value: 'calendar', label: 'Calendar', icon: CalendarIcon },
+  { value: 'copilot', label: 'Co-pilot', icon: BotIcon },
 ] as const;
 
 export default function SettingsPage() {
@@ -126,6 +128,9 @@ export default function SettingsPage() {
             </TabsContent>
             <TabsContent value="calendar">
               <CalendarSettings />
+            </TabsContent>
+            <TabsContent value="copilot">
+              <CopilotSettings />
             </TabsContent>
           </Tabs>
         </div>

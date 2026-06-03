@@ -13,6 +13,7 @@ import Analytics from '@/lib/analytics';
 import { SettingsModals } from './_components/SettingsModal';
 import { TranscriptPanel } from './_components/TranscriptPanel';
 import { AttachmentsPanel } from './_components/AttachmentsPanel';
+import CopilotSidebar from './_components/CopilotSidebar';
 import { useModalState } from '@/hooks/useModalState';
 import { useRecordingStateSync } from '@/hooks/useRecordingStateSync';
 import { useRecordingStart } from '@/hooks/useRecordingStart';
@@ -31,6 +32,7 @@ export default function Home() {
   const [isRecording, setIsRecordingState] = useState(false);
   const [barHeights, setBarHeights] = useState(['58%', '76%', '58%']);
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
+  const [copilotEnabled, setCopilotEnabled] = useState(false);
 
   // Use contexts for state management
   const { meetingTitle, currentMeetingId, setMeetingTitle, clearTranscripts } = useTranscripts();
@@ -113,6 +115,14 @@ export default function Home() {
   useEffect(() => {
     // Track page view
     Analytics.trackPageView('home');
+  }, []);
+
+  // Load copilot enabled state on mount
+  useEffect(() => {
+    fetch('http://localhost:5167/api/copilot/settings')
+      .then(r => r.json())
+      .then(d => setCopilotEnabled(!!d.copilotEnabled))
+      .catch(() => {});
   }, []);
 
   // Startup recovery check
@@ -279,6 +289,13 @@ export default function Home() {
         <AttachmentsPanel
           meetingId={currentMeetingId}
           isRecording={recordingState.isRecording}
+        />
+
+        {/* Live SA Co-pilot Sidebar */}
+        <CopilotSidebar
+          meetingId={currentMeetingId}
+          isRecording={recordingState.isRecording}
+          isEnabled={copilotEnabled}
         />
 
         </div>{/* end inner flex */}
