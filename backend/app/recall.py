@@ -7,7 +7,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-USE_MOCK_CALENDAR = True  # Set to False once TM2's gcal.py is merged
+USE_MOCK_CALENDAR = False  # TM2's gcal.py is now merged
 
 
 async def _get_upcoming_events_mock() -> list:
