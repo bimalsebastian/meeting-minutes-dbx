@@ -645,6 +645,19 @@ class UpcomingRecallResponse(BaseModel):
 class RecallSettingsRequest(BaseModel):
     recall_enabled: bool
 
+class AttachmentCreate(BaseModel):
+    attachment_id: str
+    timestamp: float
+    file_path: str
+    image_hash: str
+
+class AttachmentResponse(BaseModel):
+    id: str
+    meeting_id: str
+    timestamp: float
+    file_path: str
+    created_at: str
+
 @app.post("/search-transcripts")
 async def search_transcripts(request: SearchRequest):
     """Search through meeting transcripts for the given query"""
@@ -688,6 +701,60 @@ async def save_recall_settings(request: RecallSettingsRequest):
     """Enable or disable the pre-meeting recall feature."""
     await db.set_recall_enabled(request.recall_enabled)
     return {"status": "success"}
+
+
+@app.post("/api/meetings/{meeting_id}/attachments", status_code=201)
+async def create_attachment(meeting_id: str, request: AttachmentCreate):
+    """Save a clipboard screenshot attachment for a meeting."""
+    try:
+        logger.info(f"[main.py - create_attachment()] - Saving attachment {request.attachment_id} for meeting {meeting_id}")
+        meeting = await db.get_meeting(meeting_id)
+        if not meeting:
+            raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
+        await db.add_attachment(
+            attachment_id=request.attachment_id,
+            meeting_id=meeting_id,
+            timestamp=request.timestamp,
+            file_path=request.file_path,
+            image_hash=request.image_hash,
+        )
+        from datetime import datetime as _dt
+        return JSONResponse(status_code=201, content={
+            "id": request.attachment_id, "meeting_id": meeting_id,
+            "timestamp": request.timestamp, "file_path": request.file_path,
+            "created_at": _dt.utcnow().isoformat(),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving attachment: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meetings/{meeting_id}/attachments")
+async def get_attachments(meeting_id: str):
+    """Get all attachments for a meeting ordered by timestamp."""
+    try:
+        rows = await db.get_attachments(meeting_id)
+        return JSONResponse(content=rows)
+    except Exception as e:
+        logger.error(f"Error fetching attachments: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/meetings/{meeting_id}/attachments/{attachment_id}")
+async def delete_attachment(meeting_id: str, attachment_id: str):
+    """Delete a single attachment."""
+    try:
+        deleted = await db.delete_attachment(attachment_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"Attachment {attachment_id} not found")
+        return JSONResponse(content={"message": "Attachment deleted successfully"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting attachment: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.on_event("shutdown")
 async def shutdown_event():

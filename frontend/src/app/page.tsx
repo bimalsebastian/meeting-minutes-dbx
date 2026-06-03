@@ -12,6 +12,7 @@ import { StatusOverlays } from '@/app/_components/StatusOverlays';
 import Analytics from '@/lib/analytics';
 import { SettingsModals } from './_components/SettingsModal';
 import { TranscriptPanel } from './_components/TranscriptPanel';
+import { AttachmentsPanel } from './_components/AttachmentsPanel';
 import { useModalState } from '@/hooks/useModalState';
 import { useRecordingStateSync } from '@/hooks/useRecordingStateSync';
 import { useRecordingStart } from '@/hooks/useRecordingStart';
@@ -32,7 +33,7 @@ export default function Home() {
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
 
   // Use contexts for state management
-  const { meetingTitle, setMeetingTitle, clearTranscripts } = useTranscripts();
+  const { meetingTitle, currentMeetingId, setMeetingTitle, clearTranscripts } = useTranscripts();
   const { transcriptModelConfig, selectedDevices } = useConfig();
   const recordingState = useRecordingState();
 
@@ -274,6 +275,10 @@ export default function Home() {
           isProcessingStop={isProcessingStop}
           isStopping={isStopping}
           showModal={showModal}
+        />
+        <AttachmentsPanel
+          meetingId={currentMeetingId}
+          isRecording={recordingState.isRecording}
         />
 
         </div>{/* end inner flex */}

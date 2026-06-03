@@ -191,11 +191,23 @@ class DatabaseManager:
                     ON recall_briefs (event_id, trigger_date)
             """)
 
-            # Migration: Add recall_enabled column to settings
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS attachments (
+                    id TEXT PRIMARY KEY,
+                    meeting_id TEXT NOT NULL,
+                    timestamp REAL NOT NULL,
+                    file_path TEXT NOT NULL,
+                    image_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (meeting_id) REFERENCES meetings(id)
+                )
+            """)
+
+            # Migrations
             try:
                 cursor.execute("ALTER TABLE settings ADD COLUMN recall_enabled INTEGER DEFAULT 1")
             except sqlite3.OperationalError:
-                pass  # Column already exists
+                pass
 
             conn.commit()
 
@@ -1110,11 +1122,7 @@ class DatabaseManager:
             return (row[0] > 0) if row else False
 
     async def search_meetings_by_attendees(self, name_tokens: list) -> list:
-        """
-        Dynamic LIKE search in both transcripts and transcript_chunks tables.
-        Filters tokens < 4 chars. Returns [{meeting_id, title, created_at}] deduped,
-        ordered by created_at DESC, limited to 20 results.
-        """
+        """Dynamic LIKE search across transcripts and transcript_chunks. Skips tokens < 4 chars."""
         conditions = []
         params = []
         for token in name_tokens:
@@ -1131,7 +1139,6 @@ class DatabaseManager:
         chunk_where_clause = " OR ".join(
             c.replace("t.transcript", "tc.transcript_text") for c in conditions
         )
-
         query = f"""
             SELECT DISTINCT m.id as meeting_id, m.title, m.created_at
             FROM meetings m JOIN transcripts t ON m.id = t.meeting_id
@@ -1142,11 +1149,9 @@ class DatabaseManager:
             WHERE {chunk_where_clause}
             ORDER BY created_at DESC LIMIT 20
         """
-        all_params = params + params
-
         try:
             async with self._get_connection() as conn:
-                cursor = await conn.execute(query, all_params)
+                cursor = await conn.execute(query, params + params)
                 rows = await cursor.fetchall()
                 return [dict(zip([col[0] for col in cursor.description], row)) for row in rows]
         except Exception as e:
@@ -1154,50 +1159,38 @@ class DatabaseManager:
             return []
 
     async def get_recent_meeting_summaries(self, meeting_ids: list, limit_per_meeting: int = 3) -> list:
-        """Fetch completed summaries for given meeting_ids, returning up to limit_per_meeting per meeting."""
+        """Fetch completed summaries for given meeting_ids."""
         if not meeting_ids:
             return []
-
         results = []
         async with self._get_connection() as conn:
             for meeting_id in meeting_ids[:limit_per_meeting]:
                 cursor = await conn.execute(
                     """SELECT m.id, m.title, m.created_at, sp.result
-                        FROM meetings m
-                        JOIN summary_processes sp ON m.id = sp.meeting_id
+                        FROM meetings m JOIN summary_processes sp ON m.id = sp.meeting_id
                         WHERE m.id = ? AND sp.status = 'completed'
-                        ORDER BY m.created_at DESC
-                        LIMIT ?""",
+                        ORDER BY m.created_at DESC LIMIT ?""",
                     (meeting_id, limit_per_meeting)
                 )
-                rows = await cursor.fetchall()
-                for row in rows:
+                for row in await cursor.fetchall():
                     mid, title, created_at, result = row
-                    summary_text = ''
-                    if result:
-                        try:
-                            import json as _json
-                            parsed = _json.loads(result)
-                            if isinstance(parsed, str):
-                                parsed = _json.loads(parsed)
-                            session = parsed.get('SessionSummary', {})
-                            blocks = session.get('blocks', [])
-                            if blocks:
-                                summary_text = ' '.join(b.get('content', '') for b in blocks[:5])
-                            if not summary_text:
-                                summary_text = str(result)[:800]
-                        except Exception:
-                            summary_text = str(result)[:800]
-                    results.append({
-                        'meeting_id': mid,
-                        'title': title,
-                        'created_at': created_at,
-                        'summary_text': summary_text[:800]
-                    })
+                    summary_text = str(result)[:800] if result else ''
+                    try:
+                        import json as _json
+                        parsed = _json.loads(result)
+                        if isinstance(parsed, str):
+                            parsed = _json.loads(parsed)
+                        blocks = parsed.get('SessionSummary', {}).get('blocks', [])
+                        if blocks:
+                            summary_text = ' '.join(b.get('content', '') for b in blocks[:5])
+                    except Exception:
+                        pass
+                    results.append({'meeting_id': mid, 'title': title,
+                                    'created_at': created_at, 'summary_text': summary_text[:800]})
         return results
 
     async def get_recall_enabled(self) -> bool:
-        """Read recall_enabled from settings row id='1'. Return True if 1 or if row doesn't exist."""
+        """Read recall_enabled from settings. Returns True (default-on) if row doesn't exist."""
         try:
             async with self._get_connection() as conn:
                 cursor = await conn.execute("SELECT recall_enabled FROM settings WHERE id = '1'")
@@ -1220,14 +1213,11 @@ class DatabaseManager:
                     existing = await cursor.fetchone()
                     if existing:
                         await conn.execute(
-                            "UPDATE settings SET recall_enabled = ? WHERE id = '1'",
-                            (value,)
-                        )
+                            "UPDATE settings SET recall_enabled = ? WHERE id = '1'", (value,))
                     else:
                         await conn.execute(
                             "INSERT INTO settings (id, provider, model, whisperModel, recall_enabled) VALUES (?, ?, ?, ?, ?)",
-                            ('1', 'openai', 'gpt-4o-2024-11-20', 'large-v3', value)
-                        )
+                            ('1', 'openai', 'gpt-4o-2024-11-20', 'large-v3', value))
                     await conn.commit()
                     logger.info(f"Set recall_enabled to {enabled}")
                 except Exception as e:
@@ -1236,5 +1226,68 @@ class DatabaseManager:
                     raise
         except Exception as e:
             logger.error(f"Database connection error in set_recall_enabled: {str(e)}", exc_info=True)
+            raise
+
+    async def add_attachment(self, attachment_id: str, meeting_id: str, timestamp: float,
+                              file_path: str, image_hash: str) -> bool:
+        """Insert a new attachment. Returns True on success."""
+        now = datetime.utcnow().isoformat()
+        try:
+            async with self._get_connection() as conn:
+                await conn.execute("BEGIN TRANSACTION")
+                try:
+                    await conn.execute(
+                        """INSERT INTO attachments (id, meeting_id, timestamp, file_path, image_hash, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        (attachment_id, meeting_id, timestamp, file_path, image_hash, now)
+                    )
+                    await conn.commit()
+                    logger.info(f"Saved attachment {attachment_id} for meeting {meeting_id}")
+                    return True
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error(f"Failed to save attachment {attachment_id}: {str(e)}", exc_info=True)
+                    raise
+        except Exception as e:
+            logger.error(f"Database connection error in add_attachment: {str(e)}", exc_info=True)
+            raise
+
+    async def get_attachments(self, meeting_id: str) -> list:
+        """Return all attachments for a meeting ordered by timestamp ASC."""
+        try:
+            async with self._get_connection() as conn:
+                cursor = await conn.execute(
+                    """SELECT id, meeting_id, timestamp, file_path, image_hash, created_at
+                       FROM attachments WHERE meeting_id = ? ORDER BY timestamp ASC""",
+                    (meeting_id,)
+                )
+                rows = await cursor.fetchall()
+                return [{"id": r[0], "meeting_id": r[1], "timestamp": r[2],
+                         "file_path": r[3], "image_hash": r[4], "created_at": r[5]} for r in rows]
+        except Exception as e:
+            logger.error(f"Error getting attachments for meeting {meeting_id}: {str(e)}", exc_info=True)
+            raise
+
+    async def delete_attachment(self, attachment_id: str) -> bool:
+        """Delete a single attachment by id. Returns True if a row was deleted."""
+        try:
+            async with self._get_connection() as conn:
+                await conn.execute("BEGIN TRANSACTION")
+                try:
+                    cursor = await conn.execute(
+                        "DELETE FROM attachments WHERE id = ?", (attachment_id,))
+                    deleted = cursor.rowcount > 0
+                    await conn.commit()
+                    if deleted:
+                        logger.info(f"Deleted attachment {attachment_id}")
+                    else:
+                        logger.warning(f"Attachment {attachment_id} not found for deletion")
+                    return deleted
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error(f"Failed to delete attachment {attachment_id}: {str(e)}", exc_info=True)
+                    raise
+        except Exception as e:
+            logger.error(f"Database connection error in delete_attachment: {str(e)}", exc_info=True)
             raise
 
