@@ -34,6 +34,9 @@ export function PreferenceSettings() {
   const [calendarRefreshIntervalMinutes, setCalendarRefreshIntervalMinutes] = useState<number>(DEFAULT_REFRESH_INTERVAL_MINUTES);
   const [calendarSettingsLoaded, setCalendarSettingsLoaded] = useState(false);
 
+  const [recallEnabled, setRecallEnabled] = useState<boolean>(true);
+  const [recallSettingsLoaded, setRecallSettingsLoaded] = useState(false);
+
   // Lazy load preferences on mount (only loads if not already cached)
   useEffect(() => {
     loadPreferences();
@@ -62,6 +65,40 @@ export function PreferenceSettings() {
     })();
     return () => { mounted = false; };
   }, []);
+
+  // Load recall_enabled from backend on mount
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const resp = await fetch('http://localhost:5167/api/recall/upcoming');
+        if (resp.ok) {
+          const data = await resp.json();
+          if (mounted) {
+            setRecallEnabled(data.recall_enabled ?? true);
+          }
+        }
+      } catch (e) {
+        // Backend may not be running; default to true
+      } finally {
+        if (mounted) setRecallSettingsLoaded(true);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  const saveRecallEnabled = async (enabled: boolean) => {
+    setRecallEnabled(enabled);
+    try {
+      await fetch('http://localhost:5167/api/recall/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recall_enabled: enabled }),
+      });
+    } catch (e) {
+      console.error('Failed to save recall settings:', e);
+    }
+  };
 
   const saveCalendarSettings = async (enabled: boolean, intervalMinutes: number) => {
     try {
@@ -250,6 +287,24 @@ export function PreferenceSettings() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Pre-Meeting Recall Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Pre-Meeting Recall</h3>
+            <p className="text-sm text-gray-600">
+              Show a brief of past meetings 15 minutes before calendar events start. Requires Google Calendar connection.
+            </p>
+          </div>
+          <Switch
+            id="recall-enabled"
+            checked={recallEnabled}
+            onCheckedChange={saveRecallEnabled}
+            disabled={!recallSettingsLoaded}
+          />
+        </div>
       </div>
 
       {/* Data Storage Locations Section */}

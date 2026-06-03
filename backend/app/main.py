@@ -623,6 +623,28 @@ async def save_meeting_summary(data: MeetingSummaryUpdate):
 class SearchRequest(BaseModel):
     query: str
 
+class RecallBriefResponse(BaseModel):
+    event_id: str
+    event_title: str
+    attendees_json: str
+    brief_text: str
+    created_at: str
+    triggered_at: str
+
+class UpcomingRecallBrief(BaseModel):
+    event_id: str
+    event_title: str
+    attendees_json: str
+    brief_text: str
+    triggered_at: str
+
+class UpcomingRecallResponse(BaseModel):
+    briefs: List[UpcomingRecallBrief]
+    recall_enabled: bool
+
+class RecallSettingsRequest(BaseModel):
+    recall_enabled: bool
+
 @app.post("/search-transcripts")
 async def search_transcripts(request: SearchRequest):
     """Search through meeting transcripts for the given query"""
@@ -635,12 +657,37 @@ async def search_transcripts(request: SearchRequest):
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize calendar module and start polling loop on startup"""
+    """Initialize calendar and recall modules on startup."""
     import asyncio
+    from recall import recall_polling_loop
     init_calendar(db)
     asyncio.create_task(calendar_polling_loop(db))
-    logger.info("Calendar module initialized and polling loop started")
+    asyncio.create_task(recall_polling_loop(db))
+    logger.info("Calendar and recall modules initialized")
 
+
+@app.get("/api/recall/brief/{event_id}", response_model=RecallBriefResponse)
+async def get_recall_brief(event_id: str):
+    """Get the pre-meeting brief for a specific calendar event."""
+    brief = await db.get_recall_brief(event_id)
+    if not brief:
+        raise HTTPException(status_code=404, detail="Brief not found")
+    return brief
+
+
+@app.get("/api/recall/upcoming", response_model=UpcomingRecallResponse)
+async def get_upcoming_recall():
+    """Get upcoming recall briefs and recall enabled status."""
+    briefs = await db.get_upcoming_recall_briefs(hours_ahead=2)
+    recall_enabled = await db.get_recall_enabled()
+    return {"briefs": briefs, "recall_enabled": recall_enabled}
+
+
+@app.post("/api/recall/settings")
+async def save_recall_settings(request: RecallSettingsRequest):
+    """Enable or disable the pre-meeting recall feature."""
+    await db.set_recall_enabled(request.recall_enabled)
+    return {"status": "success"}
 
 @app.on_event("shutdown")
 async def shutdown_event():

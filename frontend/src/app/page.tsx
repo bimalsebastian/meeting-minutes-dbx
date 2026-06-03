@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { useCalendarPolling } from '@/hooks/useCalendarPolling';
 import CalendarSplitBanner from '@/components/CalendarSplitBanner';
+import { RecallBanner } from '@/components/RecallBanner';
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -242,6 +243,7 @@ export default function Home() {
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col h-screen bg-gray-50"
     >
+      <RecallBanner />
       {/* All Modals supported*/}
       <SettingsModals
         modals={modals}
