@@ -107,6 +107,26 @@ class TranscriptRequest(BaseModel):
     overlap: Optional[int] = 1000
     custom_prompt: Optional[str] = "Generate a summary of the meeting transcript."
 
+# Copilot Pydantic models
+class CopilotHint(BaseModel):
+    id: str
+    meeting_id: str
+    created_at: str
+    topic_detected: str
+    talking_points: List[str]
+    genie_used: bool
+    genie_answer: Optional[str] = None
+
+class CopilotRecordingSignal(BaseModel):
+    action: str   # "start" or "stop"
+    meeting_id: str
+
+class SaveCopilotSettingsRequest(BaseModel):
+    databricksWorkspaceHost: Optional[str] = None
+    databricksCliProfile: str = "DEFAULT"
+    copilotEnabled: bool = False
+    copilotIntervalMinutes: int = 5
+
 class SummaryProcessor:
     """Handles the processing of summaries in a thread-safe way"""
     def __init__(self):
@@ -167,6 +187,17 @@ class SummaryProcessor:
 
 # Initialize processor
 processor = SummaryProcessor()
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize co-pilot scheduler on startup"""
+    import os
+    from copilot import start_copilot_scheduler
+    kb_path = os.path.join(os.path.dirname(__file__), '..', '..', 'copilot-knowledge', 'databricks-sa-context.md')
+    kb_path = os.path.abspath(kb_path)
+    start_copilot_scheduler(db, kb_path)
+
 
 # New meeting management endpoints
 @app.get("/get-meetings", response_model=List[MeetingResponse])
@@ -629,6 +660,47 @@ async def search_transcripts(request: SearchRequest):
     except Exception as e:
         logger.error(f"Error searching transcripts: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Co-pilot endpoints ---
+
+@app.get("/api/copilot/hints/{meeting_id}")
+async def get_copilot_hints(meeting_id: str):
+    """Get all copilot hints for a meeting"""
+    hints = await db.get_copilot_hints(meeting_id)
+    return {"hints": hints}
+
+@app.post("/api/copilot/recording-signal")
+async def copilot_recording_signal(signal: CopilotRecordingSignal):
+    """Signal recording start or stop to the co-pilot backend"""
+    from copilot import set_recording_active, set_recording_stopped
+    settings = await db.get_copilot_settings()
+    interval = settings.get('copilotIntervalMinutes', 5)
+    if signal.action == "start" and signal.meeting_id:
+        set_recording_active(signal.meeting_id, interval)
+    else:
+        set_recording_stopped()
+    return {"status": "ok"}
+
+@app.get("/api/copilot/settings")
+async def get_copilot_settings():
+    """Get copilot settings (API keys are excluded)"""
+    settings = await db.get_copilot_settings()
+    # Don't expose raw API keys
+    safe = {k: v for k, v in settings.items() if 'ApiKey' not in k and 'api_key' not in k}
+    return safe
+
+@app.post("/api/copilot/settings")
+async def save_copilot_settings(request: SaveCopilotSettingsRequest):
+    """Save copilot settings"""
+    await db.save_copilot_settings(
+        request.databricksWorkspaceHost,
+        request.databricksCliProfile,
+        request.copilotEnabled,
+        request.copilotIntervalMinutes
+    )
+    return {"status": "success"}
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
