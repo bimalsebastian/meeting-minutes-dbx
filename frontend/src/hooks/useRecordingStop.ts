@@ -12,7 +12,7 @@ import Analytics from '@/lib/analytics';
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
 interface UseRecordingStopReturn {
-  handleRecordingStop: (callApi: boolean) => Promise<void>;
+  handleRecordingStop: (callApi: boolean, options?: { skipNavigation?: boolean }) => Promise<void>;
   isStopping: boolean;
   isProcessingTranscript: boolean;
   isSavingTranscript: boolean;
@@ -114,7 +114,7 @@ export function useRecordingStop(
   }, [router]);
 
   // Main recording stop handler
-  const handleRecordingStop = useCallback(async (isCallApi: boolean) => {
+  const handleRecordingStop = useCallback(async (isCallApi: boolean, options?: { skipNavigation?: boolean }) => {
     if (recordingStoppedDataRef.current) {
       await recordingStoppedDataRef.current;
     }
@@ -307,15 +307,20 @@ export function useRecordingStop(
             duration: 10000,
           });
 
-          // Auto-navigate after a short delay with source parameter
-          setTimeout(() => {
-            router.push(`/meeting-details?id=${meetingId}&source=recording`);
-            clearTranscripts()
-            Analytics.trackPageView('meeting_details');
+          // Auto-navigate after a short delay with source parameter (skip if skipNavigation is set)
+          if (!options?.skipNavigation) {
+            setTimeout(() => {
+              router.push(`/meeting-details?id=${meetingId}&source=recording`);
+              clearTranscripts();
+              Analytics.trackPageView('meeting_details');
 
-            // Reset to IDLE after navigation
+              // Reset to IDLE after navigation
+              setStatus(RecordingStatus.IDLE);
+            }, 2000);
+          } else {
+            // When skipping navigation (e.g. split flow), reset to IDLE immediately
             setStatus(RecordingStatus.IDLE);
-          }, 2000);
+          }
           // Track meeting completion analytics
           try {
             // Calculate meeting duration from transcript timestamps
@@ -416,8 +421,8 @@ export function useRecordingStop(
   });
 
   useEffect(() => {
-    (window as any).handleRecordingStop = (callApi: boolean = true) => {
-      handleRecordingStopRef.current(callApi);
+    (window as any).handleRecordingStop = (callApi: boolean = true, options?: { skipNavigation?: boolean }) => {
+      handleRecordingStopRef.current(callApi, options);
     };
 
     // Cleanup on unmount

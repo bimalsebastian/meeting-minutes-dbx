@@ -11,6 +11,7 @@ import json
 from threading import Lock
 from transcript_processor import TranscriptProcessor
 import time
+from gcal import router as calendar_router, init_calendar, calendar_polling_loop
 
 # Load environment variables
 load_dotenv()
@@ -49,6 +50,8 @@ app.add_middleware(
     allow_headers=["*"],     # Allow all headers
     max_age=3600,            # Cache preflight requests for 1 hour
 )
+
+app.include_router(calendar_router)
 
 # Global database manager instance for meeting management endpoints
 db = DatabaseManager()
@@ -629,6 +632,15 @@ async def search_transcripts(request: SearchRequest):
     except Exception as e:
         logger.error(f"Error searching transcripts: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize calendar module and start polling loop on startup"""
+    import asyncio
+    init_calendar(db)
+    asyncio.create_task(calendar_polling_loop(db))
+    logger.info("Calendar module initialized and polling loop started")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():

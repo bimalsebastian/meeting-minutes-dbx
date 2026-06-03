@@ -108,7 +108,27 @@ export function useRecordingStart(
 
       console.log('Parakeet ready - setting up meeting title and state');
 
-      const randomTitle = generateMeetingTitle();
+      // Try to pre-populate title from active calendar event
+      let calendarTitle: string | null = null;
+      try {
+        const calRes = await fetch('http://localhost:5167/api/calendar/upcoming');
+        if (calRes.ok) {
+          const calData = await calRes.json();
+          const now = new Date();
+          const activeEvent = calData.events?.find(
+            (e: { title: string; start: string; end: string }) =>
+              new Date(e.start) <= now && now < new Date(e.end)
+          );
+          if (activeEvent?.title) {
+            calendarTitle = activeEvent.title;
+            console.log('[RecordingStart] Pre-populated title from calendar:', calendarTitle);
+          }
+        }
+      } catch {
+        // Calendar not configured or backend unavailable — use generated title
+      }
+
+      const randomTitle = calendarTitle || generateMeetingTitle();
       setMeetingTitle(randomTitle);
 
       // Set STARTING status before initiating backend recording

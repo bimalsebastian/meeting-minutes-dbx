@@ -156,6 +156,23 @@ class DatabaseManager:
                 )
             """)
 
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS calendar_settings (
+                    id TEXT PRIMARY KEY,
+                    client_id TEXT,
+                    client_secret TEXT
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS calendar_tokens (
+                    id TEXT PRIMARY KEY,
+                    token_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
             conn.commit()
 
     @asynccontextmanager
@@ -909,5 +926,100 @@ class DatabaseManager:
             logger.error(f"Error updating meeting summary: {str(e)}")
             raise
 
-   
+    async def save_calendar_credentials(self, client_id: str, client_secret: str) -> None:
+        """Save or update Google Calendar OAuth credentials"""
+        try:
+            async with self._get_connection() as conn:
+                await conn.execute("BEGIN TRANSACTION")
+                try:
+                    cursor = await conn.execute("SELECT id FROM calendar_settings WHERE id = '1'")
+                    existing = await cursor.fetchone()
+                    if existing:
+                        await conn.execute(
+                            "UPDATE calendar_settings SET client_id = ?, client_secret = ? WHERE id = '1'",
+                            (client_id, client_secret)
+                        )
+                    else:
+                        await conn.execute(
+                            "INSERT INTO calendar_settings (id, client_id, client_secret) VALUES (?, ?, ?)",
+                            ('1', client_id, client_secret)
+                        )
+                    await conn.commit()
+                    logger.info("Successfully saved calendar credentials")
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error(f"Failed to save calendar credentials: {str(e)}", exc_info=True)
+                    raise
+        except Exception as e:
+            logger.error(f"Database connection error in save_calendar_credentials: {str(e)}", exc_info=True)
+            raise
+
+    async def get_calendar_credentials(self) -> Optional[dict]:
+        """Get Google Calendar OAuth credentials"""
+        async with self._get_connection() as conn:
+            cursor = await conn.execute("SELECT client_id, client_secret FROM calendar_settings WHERE id = '1'")
+            row = await cursor.fetchone()
+            if row:
+                return {'client_id': row[0], 'client_secret': row[1]}
+            return None
+
+    async def save_calendar_token(self, token_json: str) -> None:
+        """Save or update Google Calendar OAuth token"""
+        now = datetime.utcnow().isoformat()
+        try:
+            async with self._get_connection() as conn:
+                await conn.execute("BEGIN TRANSACTION")
+                try:
+                    cursor = await conn.execute("SELECT id FROM calendar_tokens WHERE id = '1'")
+                    existing = await cursor.fetchone()
+                    if existing:
+                        await conn.execute(
+                            "UPDATE calendar_tokens SET token_json = ?, updated_at = ? WHERE id = '1'",
+                            (token_json, now)
+                        )
+                    else:
+                        await conn.execute(
+                            "INSERT INTO calendar_tokens (id, token_json, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                            ('1', token_json, now, now)
+                        )
+                    await conn.commit()
+                    logger.info("Successfully saved calendar token")
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error(f"Failed to save calendar token: {str(e)}", exc_info=True)
+                    raise
+        except Exception as e:
+            logger.error(f"Database connection error in save_calendar_token: {str(e)}", exc_info=True)
+            raise
+
+    async def get_calendar_token(self) -> Optional[str]:
+        """Get Google Calendar OAuth token JSON"""
+        async with self._get_connection() as conn:
+            cursor = await conn.execute("SELECT token_json FROM calendar_tokens WHERE id = '1'")
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+    async def delete_calendar_token(self) -> None:
+        """Delete Google Calendar OAuth token"""
+        try:
+            async with self._get_connection() as conn:
+                await conn.execute("BEGIN TRANSACTION")
+                try:
+                    await conn.execute("DELETE FROM calendar_tokens WHERE id = '1'")
+                    await conn.commit()
+                    logger.info("Successfully deleted calendar token")
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error(f"Failed to delete calendar token: {str(e)}", exc_info=True)
+                    raise
+        except Exception as e:
+            logger.error(f"Database connection error in delete_calendar_token: {str(e)}", exc_info=True)
+            raise
+
+    async def has_calendar_token(self) -> bool:
+        """Check if a Google Calendar OAuth token exists"""
+        async with self._get_connection() as conn:
+            cursor = await conn.execute("SELECT id FROM calendar_tokens WHERE id = '1'")
+            row = await cursor.fetchone()
+            return row is not None
 

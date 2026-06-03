@@ -8,3 +8,7 @@ uvicorn==0.34.0
 python-multipart==0.0.20
 aiosqlite==0.21.0
 ollama==0.5.2
+google-api-python-client==2.136.0
+google-auth-oauthlib==1.2.1
+google-auth-httplib2==0.2.0
+python-dateutil==2.9.0
