@@ -21,6 +21,7 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { RecallBanner } from '@/components/RecallBanner';
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -196,6 +197,7 @@ export default function Home() {
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col h-screen bg-gray-50"
     >
+      <RecallBanner />
       {/* All Modals supported*/}
       <SettingsModals
         modals={modals}

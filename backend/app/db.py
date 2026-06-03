@@ -156,6 +156,30 @@ class DatabaseManager:
                 )
             """)
 
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS recall_briefs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT NOT NULL,
+                    event_title TEXT NOT NULL,
+                    attendees_json TEXT NOT NULL,
+                    brief_text TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    triggered_at TEXT NOT NULL,
+                    trigger_date TEXT NOT NULL
+                )
+            """)
+
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_recall_briefs_event_date
+                    ON recall_briefs (event_id, trigger_date)
+            """)
+
+            # Migration: Add recall_enabled column to settings
+            try:
+                cursor.execute("ALTER TABLE settings ADD COLUMN recall_enabled INTEGER DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
             conn.commit()
 
     @asynccontextmanager
@@ -908,6 +932,201 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error updating meeting summary: {str(e)}")
             raise
+    async def save_recall_brief(self, event_id: str, event_title: str, attendees_json: str, brief_text: str) -> None:
+        """Upsert recall brief. Sets trigger_date to today's UTC date."""
+        now = datetime.utcnow().isoformat()
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        try:
+            async with self._get_connection() as conn:
+                await conn.execute("BEGIN TRANSACTION")
+                try:
+                    await conn.execute(
+                        """INSERT OR REPLACE INTO recall_briefs
+                            (event_id, event_title, attendees_json, brief_text, created_at, triggered_at, trigger_date)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        (event_id, event_title, attendees_json, brief_text, now, now, today)
+                    )
+                    await conn.commit()
+                    logger.info(f"Saved recall brief for event_id: {event_id}")
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error(f"Failed to save recall brief for event_id {event_id}: {str(e)}", exc_info=True)
+                    raise
+        except Exception as e:
+            logger.error(f"Database connection error in save_recall_brief: {str(e)}", exc_info=True)
+            raise
 
-   
+    async def get_recall_brief(self, event_id: str) -> Optional[dict]:
+        """Return most recent brief for event_id, or None."""
+        async with self._get_connection() as conn:
+            cursor = await conn.execute(
+                """SELECT event_id, event_title, attendees_json, brief_text, created_at, triggered_at
+                    FROM recall_briefs WHERE event_id = ?
+                    ORDER BY created_at DESC LIMIT 1""",
+                (event_id,)
+            )
+            row = await cursor.fetchone()
+            if row:
+                return dict(zip([col[0] for col in cursor.description], row))
+            return None
+
+    async def get_upcoming_recall_briefs(self, hours_ahead: int = 2) -> list:
+        """Return briefs where triggered_at >= (utcnow - hours_ahead hours)."""
+        from datetime import timedelta
+        cutoff = (datetime.utcnow() - timedelta(hours=hours_ahead)).isoformat()
+        async with self._get_connection() as conn:
+            cursor = await conn.execute(
+                """SELECT event_id, event_title, attendees_json, brief_text, triggered_at
+                    FROM recall_briefs WHERE triggered_at >= ?
+                    ORDER BY triggered_at DESC""",
+                (cutoff,)
+            )
+            rows = await cursor.fetchall()
+            return [dict(zip([col[0] for col in cursor.description], row)) for row in rows]
+
+    async def is_brief_triggered_today(self, event_id: str) -> bool:
+        """Return True if a row exists for event_id with today's UTC date."""
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        async with self._get_connection() as conn:
+            cursor = await conn.execute(
+                "SELECT COUNT(*) FROM recall_briefs WHERE event_id = ? AND trigger_date = ?",
+                (event_id, today)
+            )
+            row = await cursor.fetchone()
+            return (row[0] > 0) if row else False
+
+    async def search_meetings_by_attendees(self, name_tokens: list) -> list:
+        """
+        Dynamic LIKE search in both transcripts and transcript_chunks tables.
+        Filters tokens < 4 chars. Returns [{meeting_id, title, created_at}] deduped,
+        ordered by created_at DESC, limited to 20 results.
+        """
+        # Build WHERE conditions dynamically
+        conditions = []
+        params = []
+        for token in name_tokens:
+            if len(token) < 4:
+                continue
+            token_lower = f"%{token.lower()}%"
+            conditions.append("LOWER(t.transcript) LIKE ?")
+            params.append(token_lower)
+
+        if not conditions:
+            return []
+
+        where_clause = " OR ".join(conditions)
+        chunk_where_clause = " OR ".join(
+            c.replace("t.transcript", "tc.transcript_text") for c in conditions
+        )
+
+        query = f"""
+            SELECT DISTINCT m.id as meeting_id, m.title, m.created_at
+            FROM meetings m JOIN transcripts t ON m.id = t.meeting_id
+            WHERE {where_clause}
+            UNION
+            SELECT DISTINCT m.id as meeting_id, m.title, m.created_at
+            FROM meetings m JOIN transcript_chunks tc ON m.id = tc.meeting_id
+            WHERE {chunk_where_clause}
+            ORDER BY created_at DESC LIMIT 20
+        """
+        # params doubled: once for transcripts part, once for transcript_chunks part
+        all_params = params + params
+
+        try:
+            async with self._get_connection() as conn:
+                cursor = await conn.execute(query, all_params)
+                rows = await cursor.fetchall()
+                return [dict(zip([col[0] for col in cursor.description], row)) for row in rows]
+        except Exception as e:
+            logger.error(f"Error in search_meetings_by_attendees: {str(e)}", exc_info=True)
+            return []
+
+    async def get_recent_meeting_summaries(self, meeting_ids: list, limit_per_meeting: int = 3) -> list:
+        """
+        For each meeting_id: fetch summary_processes.result (if status='completed').
+        Return [{meeting_id, title, created_at, summary_text}] where summary_text is first 800 chars of result.
+        """
+        if not meeting_ids:
+            return []
+
+        results = []
+        async with self._get_connection() as conn:
+            for meeting_id in meeting_ids[:limit_per_meeting]:
+                cursor = await conn.execute(
+                    """SELECT m.id, m.title, m.created_at, sp.result
+                        FROM meetings m
+                        JOIN summary_processes sp ON m.id = sp.meeting_id
+                        WHERE m.id = ? AND sp.status = 'completed'
+                        ORDER BY m.created_at DESC
+                        LIMIT ?""",
+                    (meeting_id, limit_per_meeting)
+                )
+                rows = await cursor.fetchall()
+                for row in rows:
+                    mid, title, created_at, result = row
+                    summary_text = ''
+                    if result:
+                        try:
+                            import json as _json
+                            parsed = _json.loads(result)
+                            if isinstance(parsed, str):
+                                parsed = _json.loads(parsed)
+                            # Try to get SessionSummary blocks text
+                            session = parsed.get('SessionSummary', {})
+                            blocks = session.get('blocks', [])
+                            if blocks:
+                                summary_text = ' '.join(b.get('content', '') for b in blocks[:5])
+                            if not summary_text:
+                                summary_text = str(result)[:800]
+                        except Exception:
+                            summary_text = str(result)[:800]
+                    results.append({
+                        'meeting_id': mid,
+                        'title': title,
+                        'created_at': created_at,
+                        'summary_text': summary_text[:800]
+                    })
+        return results
+
+    async def get_recall_enabled(self) -> bool:
+        """Read recall_enabled from settings row id='1'. Return True if 1 or if row doesn't exist."""
+        try:
+            async with self._get_connection() as conn:
+                cursor = await conn.execute("SELECT recall_enabled FROM settings WHERE id = '1'")
+                row = await cursor.fetchone()
+                if row is None:
+                    return True  # Default on
+                return bool(row[0]) if row[0] is not None else True
+        except Exception as e:
+            logger.error(f"Error in get_recall_enabled: {str(e)}", exc_info=True)
+            return True
+
+    async def set_recall_enabled(self, enabled: bool) -> None:
+        """Update recall_enabled in settings row id='1'."""
+        value = 1 if enabled else 0
+        try:
+            async with self._get_connection() as conn:
+                await conn.execute("BEGIN TRANSACTION")
+                try:
+                    cursor = await conn.execute("SELECT id FROM settings WHERE id = '1'")
+                    existing = await cursor.fetchone()
+                    if existing:
+                        await conn.execute(
+                            "UPDATE settings SET recall_enabled = ? WHERE id = '1'",
+                            (value,)
+                        )
+                    else:
+                        await conn.execute(
+                            "INSERT INTO settings (id, provider, model, whisperModel, recall_enabled) VALUES (?, ?, ?, ?, ?)",
+                            ('1', 'openai', 'gpt-4o-2024-11-20', 'large-v3', value)
+                        )
+                    await conn.commit()
+                    logger.info(f"Set recall_enabled to {enabled}")
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error(f"Failed to set recall_enabled: {str(e)}", exc_info=True)
+                    raise
+        except Exception as e:
+            logger.error(f"Database connection error in set_recall_enabled: {str(e)}", exc_info=True)
+            raise
 
