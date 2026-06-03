@@ -14,6 +14,7 @@ import { SettingsModals } from './_components/SettingsModal';
 import { TranscriptPanel } from './_components/TranscriptPanel';
 import { AttachmentsPanel } from './_components/AttachmentsPanel';
 import CopilotSidebar from './_components/CopilotSidebar';
+import { FeatureErrorBoundary } from '@/components/FeatureErrorBoundary';
 import { useModalState } from '@/hooks/useModalState';
 import { useRecordingStateSync } from '@/hooks/useRecordingStateSync';
 import { useRecordingStart } from '@/hooks/useRecordingStart';
@@ -254,7 +255,7 @@ export default function Home() {
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col h-screen bg-gray-50"
     >
-      <RecallBanner />
+      <FeatureErrorBoundary name="RecallBanner"><RecallBanner /></FeatureErrorBoundary>
       {/* All Modals supported*/}
       <SettingsModals
         modals={modals}
@@ -274,11 +275,13 @@ export default function Home() {
       <div className="flex flex-1 overflow-hidden" style={{ flexDirection: 'column' }}>
         {/* Calendar auto-split banner — shown when a meeting ends during recording */}
         {recordingState.isRecording && (
-          <CalendarSplitBanner
-            state={calendarState}
-            onSplitNow={handleCalendarSplitNow}
-            onKeepRecording={handleKeepRecording}
-          />
+          <FeatureErrorBoundary name="CalendarSplitBanner">
+            <CalendarSplitBanner
+              state={calendarState}
+              onSplitNow={handleCalendarSplitNow}
+              onKeepRecording={handleKeepRecording}
+            />
+          </FeatureErrorBoundary>
         )}
         <div className="flex flex-1 overflow-hidden">
         <TranscriptPanel
@@ -286,17 +289,21 @@ export default function Home() {
           isStopping={isStopping}
           showModal={showModal}
         />
-        <AttachmentsPanel
-          meetingId={currentMeetingId}
-          isRecording={recordingState.isRecording}
-        />
+        <FeatureErrorBoundary name="AttachmentsPanel">
+          <AttachmentsPanel
+            meetingId={currentMeetingId}
+            isRecording={recordingState.isRecording}
+          />
+        </FeatureErrorBoundary>
 
         {/* Live SA Co-pilot Sidebar */}
-        <CopilotSidebar
-          meetingId={currentMeetingId}
-          isRecording={recordingState.isRecording}
-          isEnabled={copilotEnabled}
-        />
+        <FeatureErrorBoundary name="CopilotSidebar">
+          <CopilotSidebar
+            meetingId={currentMeetingId}
+            isRecording={recordingState.isRecording}
+            isEnabled={copilotEnabled}
+          />
+        </FeatureErrorBoundary>
 
         </div>{/* end inner flex */}
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
