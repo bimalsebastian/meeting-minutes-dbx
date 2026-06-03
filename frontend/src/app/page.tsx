@@ -30,7 +30,7 @@ export default function Home() {
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
 
   // Use contexts for state management
-  const { meetingTitle } = useTranscripts();
+  const { meetingTitle, currentMeetingId } = useTranscripts();
   const { transcriptModelConfig, selectedDevices } = useConfig();
   const recordingState = useRecordingState();
 
@@ -220,7 +220,7 @@ export default function Home() {
           showModal={showModal}
         />
         <AttachmentsPanel
-          meetingId={null}
+          meetingId={currentMeetingId}
           isRecording={recordingState.isRecording}
         />
 
