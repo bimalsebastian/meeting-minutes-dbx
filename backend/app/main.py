@@ -88,6 +88,7 @@ class SaveTranscriptRequest(BaseModel):
     meeting_title: str
     transcripts: List[Transcript]
     folder_path: Optional[str] = None  # NEW: Path to meeting folder (for new folder structure)
+    meeting_id: Optional[str] = None   # Pre-generated UUID from Rust (for attachment linkage)
 
 class SaveModelConfigRequest(BaseModel):
     provider: str
@@ -544,8 +545,9 @@ async def save_transcript(request: SaveTranscriptRequest):
             first = request.transcripts[0]
             logger.debug(f"First transcript: audio_start_time={first.audio_start_time}, audio_end_time={first.audio_end_time}, duration={first.duration}")
 
-        # Generate a unique meeting ID
-        meeting_id = f"meeting-{int(time.time() * 1000)}"
+        # Use pre-generated UUID from Rust (preserves attachment linkage) or fall back to timestamp ID
+        meeting_id = request.meeting_id or f"meeting-{int(time.time() * 1000)}"
+        logger.info(f"[main.py - save_transcript()] - Using meeting_id: {meeting_id} (from_rust={request.meeting_id is not None})")
 
         # Save the meeting with folder path (if provided)
         await db.save_meeting(meeting_id, request.meeting_title, folder_path=request.folder_path)
@@ -732,9 +734,9 @@ async def create_attachment(meeting_id: str, request: AttachmentCreate):
     """Save a clipboard screenshot attachment for a meeting."""
     try:
         logger.info(f"[main.py - create_attachment()] - Saving attachment {request.attachment_id} for meeting {meeting_id}")
-        meeting = await db.get_meeting(meeting_id)
-        if not meeting:
-            raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
+        # No pre-existence check: SQLite does not enforce FKs by default, and the meeting
+        # record is only created at recording stop. Attachments are captured during recording
+        # and linked by UUID; they will be consistent once /save-transcript completes.
         await db.add_attachment(
             attachment_id=request.attachment_id,
             meeting_id=meeting_id,
