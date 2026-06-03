@@ -32,7 +32,11 @@
             "assetProtocol": {
                 "enable": true,
                 "scope": [
-                    "$APPDATA/**"
+                    "$APPDATA/**",
+                    "$VIDEO/**",
+                    "$AUDIO/**",
+                    "$DOCUMENT/**",
+                    "$DOWNLOAD/**"
                 ]
             },
             "capabilities": [
