@@ -52,6 +52,7 @@ pub mod meeting_detector;
 pub mod tray;
 pub mod utils;
 pub mod whisper_engine;
+pub mod clipboard_monitor;
 
 use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
 use log::{error as log_error, info as log_info};
@@ -393,6 +394,18 @@ async fn set_language_preference(language: String) -> Result<(), String> {
 // Internal helper function to get language preference (for use within Rust code)
 pub fn get_language_preference_internal() -> Option<String> {
     LANGUAGE_PREFERENCE.lock().ok().map(|lang| lang.clone())
+}
+
+#[tauri::command]
+async fn start_clipboard_monitor<R: tauri::Runtime>(app: tauri::AppHandle<R>, meeting_id: String) -> Result<(), String> {
+    crate::clipboard_monitor::start_monitor(app, meeting_id, std::path::PathBuf::from("/tmp"));
+    Ok(())
+}
+
+#[tauri::command]
+async fn stop_clipboard_monitor() -> Result<(), String> {
+    crate::clipboard_monitor::stop_monitor();
+    Ok(())
 }
 
 pub fn run() {
@@ -760,6 +773,8 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             utils::open_system_settings,
             meeting_detector::get_active_window_title,
+            start_clipboard_monitor,
+            stop_clipboard_monitor,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -45,6 +45,20 @@ static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 // Listener ID for proper cleanup - prevents microphone from staying active after recording stops
 static TRANSCRIPT_LISTENER_ID: Mutex<Option<tauri::EventId>> = Mutex::new(None);
 
+// Current meeting ID for clipboard monitor / attachment tagging
+static CURRENT_MEETING_ID: Mutex<Option<String>> = Mutex::new(None);
+
+/// Returns the elapsed wall-clock duration of the current recording in seconds.
+/// Returns 0.0 if no recording is active.
+pub fn get_current_recording_duration() -> f64 {
+    let manager_guard = RECORDING_MANAGER.lock().unwrap();
+    if let Some(manager) = manager_guard.as_ref() {
+        manager.get_recording_duration().unwrap_or(0.0)
+    } else {
+        0.0
+    }
+}
+
 // ============================================================================
 // PUBLIC TYPES
 // ============================================================================
@@ -247,6 +261,22 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     IS_RECORDING.store(true, Ordering::SeqCst);
     reset_speech_detected_flag(); // Reset for new recording session
 
+    // Start clipboard monitor for screenshot attachment capture
+    {
+        let meeting_uuid = uuid::Uuid::new_v4().to_string();
+        let base_folder = super::recording_preferences::get_default_recordings_folder();
+        let folder_path = base_folder.join(&meeting_uuid);
+        std::fs::create_dir_all(&folder_path).ok();
+
+        // Store meeting ID so stop_recording can retrieve it
+        {
+            let mut mid = CURRENT_MEETING_ID.lock().unwrap();
+            *mid = Some(meeting_uuid.clone());
+        }
+
+        crate::clipboard_monitor::start_monitor(app.clone(), meeting_uuid, folder_path);
+    }
+
     // Start optimized parallel transcription task and store handle
     let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
     {
@@ -414,6 +444,22 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
     reset_speech_detected_flag(); // Reset for new recording session
+
+    // Start clipboard monitor for screenshot attachment capture
+    {
+        let meeting_uuid = uuid::Uuid::new_v4().to_string();
+        let base_folder = super::recording_preferences::get_default_recordings_folder();
+        let folder_path = base_folder.join(&meeting_uuid);
+        std::fs::create_dir_all(&folder_path).ok();
+
+        // Store meeting ID so stop_recording can retrieve it
+        {
+            let mut mid = CURRENT_MEETING_ID.lock().unwrap();
+            *mid = Some(meeting_uuid.clone());
+        }
+
+        crate::clipboard_monitor::start_monitor(app.clone(), meeting_uuid, folder_path);
+    }
 
     // Start optimized parallel transcription task and store handle
     let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
@@ -839,6 +885,9 @@ pub async fn stop_recording<R: Runtime>(
         info!("ℹ️ No recording manager available for cleanup");
         (None, None)
     };
+
+    // Stop clipboard monitor now that recording is done
+    crate::clipboard_monitor::stop_monitor();
 
     // Set recording flag to false
     info!("🔍 Setting IS_RECORDING to false");

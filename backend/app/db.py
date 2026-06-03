@@ -156,6 +156,18 @@ class DatabaseManager:
                 )
             """)
 
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS attachments (
+                    id TEXT PRIMARY KEY,
+                    meeting_id TEXT NOT NULL,
+                    timestamp REAL NOT NULL,
+                    file_path TEXT NOT NULL,
+                    image_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (meeting_id) REFERENCES meetings(id)
+                )
+            """)
+
             conn.commit()
 
     @asynccontextmanager
@@ -909,5 +921,84 @@ class DatabaseManager:
             logger.error(f"Error updating meeting summary: {str(e)}")
             raise
 
-   
+    async def add_attachment(self, attachment_id: str, meeting_id: str, timestamp: float,
+                              file_path: str, image_hash: str) -> bool:
+        """Insert a new attachment. Returns True on success."""
+        now = datetime.utcnow().isoformat()
+        try:
+            async with self._get_connection() as conn:
+                await conn.execute("BEGIN TRANSACTION")
+                try:
+                    await conn.execute(
+                        """
+                        INSERT INTO attachments (id, meeting_id, timestamp, file_path, image_hash, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (attachment_id, meeting_id, timestamp, file_path, image_hash, now)
+                    )
+                    await conn.commit()
+                    logger.info(f"Saved attachment {attachment_id} for meeting {meeting_id}")
+                    return True
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error(f"Failed to save attachment {attachment_id}: {str(e)}", exc_info=True)
+                    raise
+        except Exception as e:
+            logger.error(f"Database connection error in add_attachment: {str(e)}", exc_info=True)
+            raise
+
+    async def get_attachments(self, meeting_id: str) -> list:
+        """Return all attachments for a meeting ordered by timestamp ASC.
+        Each dict has keys: id, meeting_id, timestamp, file_path, image_hash, created_at."""
+        try:
+            async with self._get_connection() as conn:
+                cursor = await conn.execute(
+                    """
+                    SELECT id, meeting_id, timestamp, file_path, image_hash, created_at
+                    FROM attachments
+                    WHERE meeting_id = ?
+                    ORDER BY timestamp ASC
+                    """,
+                    (meeting_id,)
+                )
+                rows = await cursor.fetchall()
+                return [
+                    {
+                        "id": row[0],
+                        "meeting_id": row[1],
+                        "timestamp": row[2],
+                        "file_path": row[3],
+                        "image_hash": row[4],
+                        "created_at": row[5],
+                    }
+                    for row in rows
+                ]
+        except Exception as e:
+            logger.error(f"Error getting attachments for meeting {meeting_id}: {str(e)}", exc_info=True)
+            raise
+
+    async def delete_attachment(self, attachment_id: str) -> bool:
+        """Delete a single attachment by id. Returns True if a row was deleted."""
+        try:
+            async with self._get_connection() as conn:
+                await conn.execute("BEGIN TRANSACTION")
+                try:
+                    cursor = await conn.execute(
+                        "DELETE FROM attachments WHERE id = ?",
+                        (attachment_id,)
+                    )
+                    deleted = cursor.rowcount > 0
+                    await conn.commit()
+                    if deleted:
+                        logger.info(f"Deleted attachment {attachment_id}")
+                    else:
+                        logger.warning(f"Attachment {attachment_id} not found for deletion")
+                    return deleted
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error(f"Failed to delete attachment {attachment_id}: {str(e)}", exc_info=True)
+                    raise
+        except Exception as e:
+            logger.error(f"Database connection error in delete_attachment: {str(e)}", exc_info=True)
+            raise
 
