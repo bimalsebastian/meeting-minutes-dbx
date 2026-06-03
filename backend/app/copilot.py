@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import os
-import importlib
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -16,6 +15,7 @@ _recording_start_time: Optional[datetime] = None
 _scheduler: Optional[AsyncIOScheduler] = None
 _knowledge_base_content: str = ""
 _db = None
+_genie_available: Optional[bool] = None  # None=unchecked, True=ready, False=disabled
 
 
 def load_knowledge_base(path: str) -> str:
@@ -31,27 +31,130 @@ def load_knowledge_base(path: str) -> str:
         return ""
 
 
-async def call_genie(question: str, workspace_host: str, cli_profile: str) -> Optional[str]:
-    """Attempt to call Genie MCP. Returns answer string or None if unavailable."""
+async def _check_genie_available(workspace_host: str, cli_profile: str) -> None:
+    """Probe the Genie MCP endpoint at startup. Sets _genie_available accordingly."""
+    global _genie_available
     try:
-        mcp_mod = importlib.import_module('databricks.mcp')
-        # Use whatever API it exposes — wrap in asyncio.wait_for timeout=15s
-        genie_func = getattr(mcp_mod, 'ask_genie', None) or getattr(mcp_mod, 'query', None)
-        if genie_func is None:
-            logger.warning("databricks.mcp found but no known query function — skipping Genie escalation")
-            return None
-        result = await asyncio.wait_for(genie_func(question, workspace_host=workspace_host, profile=cli_profile), timeout=15)
-        if result:
-            return str(result)
-        return None
+        from databricks.mcp import DatabricksMCPClient
+        from databricks.sdk import WorkspaceClient
+
+        client = DatabricksMCPClient(
+            server_url=f"{workspace_host}/api/2.0/mcp/genie",
+            workspace_client=WorkspaceClient(profile=cli_profile),
+        )
+        tools = await asyncio.wait_for(client.alist_tools(), timeout=10.0)
+        tool_names = [t.name for t in tools] if tools else []
+        if "genie_ask" in tool_names:
+            _genie_available = True
+            logger.info(f"[copilot.py:{_check_genie_available.__code__.co_firstlineno} - _check_genie_available()] - Genie available. Tools: {tool_names}")
+        else:
+            _genie_available = False
+            logger.warning(f"[copilot.py - _check_genie_available()] - genie_ask not found in MCP tools {tool_names}. Genie disabled.")
     except ImportError:
-        logger.warning("databricks-mcp not installed — skipping Genie escalation")
+        _genie_available = False
+        logger.warning("[copilot.py - _check_genie_available()] - databricks-mcp not installed. Genie disabled.")
+    except asyncio.TimeoutError:
+        _genie_available = False
+        logger.warning("[copilot.py - _check_genie_available()] - Genie startup probe timed out. Genie disabled.")
+    except Exception as e:
+        _genie_available = False
+        logger.warning(f"[copilot.py - _check_genie_available()] - Genie startup probe failed: {e}. Genie disabled.")
+
+
+async def call_genie(question: str, workspace_host: str, cli_profile: str) -> Optional[str]:
+    """Call Genie via databricks-mcp 0.9.0 DatabricksMCPClient.acall_tool() API."""
+    global _genie_available
+    if _genie_available is False:
+        return None
+
+    try:
+        from databricks.mcp import DatabricksMCPClient
+        from databricks.sdk import WorkspaceClient
+
+        # Lazy startup check if not yet run
+        if _genie_available is None:
+            await _check_genie_available(workspace_host, cli_profile)
+            if not _genie_available:
+                return None
+
+        client = DatabricksMCPClient(
+            server_url=f"{workspace_host}/api/2.0/mcp/genie",
+            workspace_client=WorkspaceClient(profile=cli_profile),
+        )
+
+        # Start conversation
+        result = await asyncio.wait_for(
+            client.acall_tool("genie_ask", {"question": question}),
+            timeout=15.0,
+        )
+        if not result or not result.content:
+            logger.warning("[copilot.py - call_genie()] - genie_ask returned empty result")
+            return None
+
+        response_text = result.content[0].text
+
+        # Parse conversation_id — response may be JSON with an id field or plain text answer
+        conversation_id = None
+        try:
+            response_json = json.loads(response_text)
+            conversation_id = (
+                response_json.get("conversation_id")
+                or response_json.get("conversationId")
+                or response_json.get("id")
+            )
+            if not conversation_id:
+                # Synchronous answer returned directly in JSON
+                answer = response_json.get("answer") or response_json.get("response") or response_json.get("text")
+                return str(answer) if answer else response_text
+        except (json.JSONDecodeError, AttributeError):
+            # Plain-text synchronous answer
+            if response_text and len(response_text) > 10:
+                return response_text
+
+        if not conversation_id:
+            return response_text or None
+
+        # Poll for completion — 15 attempts × 1s = 15s max
+        for _ in range(15):
+            await asyncio.sleep(1)
+            try:
+                poll = await asyncio.wait_for(
+                    client.acall_tool("genie_poll_response", {"conversation_id": conversation_id}),
+                    timeout=5.0,
+                )
+            except asyncio.TimeoutError:
+                continue
+
+            if not poll or not poll.content:
+                continue
+
+            poll_text = poll.content[0].text
+            try:
+                poll_json = json.loads(poll_text)
+                status = poll_json.get("status", "").lower()
+                if status in ("completed", "done", "finished", "success"):
+                    answer = poll_json.get("answer") or poll_json.get("response") or poll_json.get("text")
+                    return str(answer) if answer else poll_text
+                if status in ("failed", "error"):
+                    logger.warning(f"[copilot.py - call_genie()] - Genie poll error status: {poll_json}")
+                    return None
+                # Still pending — continue loop
+            except (json.JSONDecodeError, AttributeError):
+                if poll_text and len(poll_text) > 10:
+                    return poll_text
+
+        logger.warning("[copilot.py - call_genie()] - Genie polling exceeded 15s, returning None")
+        return None
+
+    except ImportError:
+        _genie_available = False
+        logger.warning("[copilot.py - call_genie()] - databricks-mcp not installed. Genie disabled.")
         return None
     except asyncio.TimeoutError:
-        logger.warning("Genie MCP call timed out after 15s")
+        logger.warning("[copilot.py - call_genie()] - genie_ask initial call timed out after 15s")
         return None
     except Exception as e:
-        logger.error(f"Genie MCP call failed: {e}")
+        logger.error(f"[copilot.py - call_genie()] - Genie call failed: {e}", exc_info=True)
         return None
 
 
@@ -242,15 +345,15 @@ def set_recording_stopped():
     logger.info("Co-pilot: recording stopped")
 
 
-def start_copilot_scheduler(db, knowledge_base_path: str):
-    """Initialize APScheduler and start the copilot job."""
+async def start_copilot_scheduler(db, knowledge_base_path: str):
+    """Initialize APScheduler, start the copilot job, and probe Genie if configured."""
     global _scheduler, _knowledge_base_content, _db
     _db = db
     _knowledge_base_content = load_knowledge_base(knowledge_base_path)
     if _knowledge_base_content:
-        logger.info(f"Co-pilot: loaded knowledge base ({len(_knowledge_base_content)} chars)")
+        logger.info(f"[copilot.py - start_copilot_scheduler()] - Loaded knowledge base ({len(_knowledge_base_content)} chars)")
     else:
-        logger.warning("Co-pilot: knowledge base not found or empty")
+        logger.warning("[copilot.py - start_copilot_scheduler()] - Knowledge base not found or empty")
 
     _scheduler = AsyncIOScheduler()
     _scheduler.add_job(
@@ -258,7 +361,20 @@ def start_copilot_scheduler(db, knowledge_base_path: str):
         trigger=IntervalTrigger(minutes=5),
         id='copilot_job',
         max_instances=1,
-        replace_existing=True
+        replace_existing=True,
     )
     _scheduler.start()
-    logger.info("Co-pilot scheduler started")
+    logger.info("[copilot.py - start_copilot_scheduler()] - Co-pilot scheduler started")
+
+    # Probe Genie availability now if workspace_host is already configured in the DB.
+    # Runs as a background task so it doesn't block FastAPI startup.
+    try:
+        settings = await db.get_copilot_settings()
+        workspace_host = settings.get("databricksWorkspaceHost")
+        cli_profile = settings.get("databricksCliProfile", "DEFAULT")
+        if workspace_host:
+            asyncio.create_task(_check_genie_available(workspace_host, cli_profile))
+        else:
+            logger.info("[copilot.py - start_copilot_scheduler()] - No Databricks workspace configured; Genie check deferred")
+    except Exception as e:
+        logger.warning(f"[copilot.py - start_copilot_scheduler()] - Could not read settings for Genie check: {e}")

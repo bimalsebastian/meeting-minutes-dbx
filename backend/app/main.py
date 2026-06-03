@@ -196,7 +196,7 @@ async def startup_event():
     from copilot import start_copilot_scheduler
     kb_path = os.path.join(os.path.dirname(__file__), '..', '..', 'copilot-knowledge', 'databricks-sa-context.md')
     kb_path = os.path.abspath(kb_path)
-    start_copilot_scheduler(db, kb_path)
+    await start_copilot_scheduler(db, kb_path)
 
 
 # New meeting management endpoints
