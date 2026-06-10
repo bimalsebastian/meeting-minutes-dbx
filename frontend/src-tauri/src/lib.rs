@@ -446,7 +446,22 @@ pub fn run() {
             .to_vec()
     };
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    // Single-instance guard: second launch reuses existing process and focuses window
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            log_info!(
+                "Second app instance requested with args: {:?}, cwd: {:?}",
+                args,
+                cwd
+            );
+            tray::focus_main_window(app);
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
@@ -558,6 +573,18 @@ pub fn run() {
             }
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    if let Err(e) = window.hide() {
+                        log::error!("Failed to hide main window on close request: {}", e);
+                    } else {
+                        log::info!("Main window hidden to tray on close request");
+                    }
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             start_recording,
@@ -796,29 +823,36 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
-            if let tauri::RunEvent::Exit = event {
-                log::info!("Application exiting, cleaning up resources...");
-                crate::python_backend::stop_backend();
-                tauri::async_runtime::block_on(async {
-                    // Clean up database connection and checkpoint WAL
-                    if let Some(app_state) = _app_handle.try_state::<state::AppState>() {
-                        log::info!("Starting database cleanup...");
-                        if let Err(e) = app_state.db_manager.cleanup().await {
-                            log::error!("Failed to cleanup database: {}", e);
+            match event {
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen { .. } => {
+                    tray::focus_main_window(_app_handle);
+                }
+                tauri::RunEvent::Exit => {
+                    log::info!("Application exiting, cleaning up resources...");
+                    crate::python_backend::stop_backend();
+                    tauri::async_runtime::block_on(async {
+                        // Clean up database connection and checkpoint WAL
+                        if let Some(app_state) = _app_handle.try_state::<state::AppState>() {
+                            log::info!("Starting database cleanup...");
+                            if let Err(e) = app_state.db_manager.cleanup().await {
+                                log::error!("Failed to cleanup database: {}", e);
+                            } else {
+                                log::info!("Database cleanup completed successfully");
+                            }
                         } else {
-                            log::info!("Database cleanup completed successfully");
+                            log::warn!("AppState not available for database cleanup (likely first launch)");
                         }
-                    } else {
-                        log::warn!("AppState not available for database cleanup (likely first launch)");
-                    }
 
-                    // Clean up sidecar
-                    log::info!("Cleaning up sidecar...");
-                    if let Err(e) = summary::summary_engine::force_shutdown_sidecar().await {
-                        log::error!("Failed to force shutdown sidecar: {}", e);
-                    }
-                });
-                log::info!("Application cleanup complete");
+                        // Clean up sidecar
+                        log::info!("Cleaning up sidecar...");
+                        if let Err(e) = summary::summary_engine::force_shutdown_sidecar().await {
+                            log::error!("Failed to force shutdown sidecar: {}", e);
+                        }
+                    });
+                    log::info!("Application cleanup complete");
+                }
+                _ => {}
             }
         });
 }
