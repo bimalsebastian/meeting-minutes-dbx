@@ -1109,24 +1109,30 @@ async def _run_genie_cycle(
         quality_score=2,
     )
 
-    # Step 6: Run LangGraph agent
+    # Step 6: Run LangGraph agent (always mark hint non-pending on any exit path)
+    async def _mark_hint_failed():
+        if hint_id:
+            try:
+                await db.update_copilot_hint(hint_id, {
+                    "genie_status": "unavailable",
+                    "updated_at": datetime.datetime.utcnow().isoformat(),
+                })
+            except Exception:
+                pass
+
     graph = get_graph(db)
-    if graph:
-        try:
+    try:
+        if graph:
             config = {"configurable": {"thread_id": f"{meeting_id}_{persisted['cycles_completed']}"}}
             final_state = await graph.ainvoke(working_state, config=config)
-        except Exception as e:
-            logger.error(f"[genie_live] graph failed — {e}")
-            if hint_id:
-                try:
-                    await db.update_copilot_hint(hint_id, {"genie_status": "unavailable", "updated_at": datetime.datetime.utcnow().isoformat()})
-                except Exception:
-                    pass
-            return None
-    else:
-        # LangGraph unavailable — run nodes directly
-        s = await retrieve_node(working_state)
-        final_state = await synthesise_node(s, db=db)
+        else:
+            # LangGraph unavailable — run nodes directly
+            s = await retrieve_node(working_state)
+            final_state = await synthesise_node(s, db=db)
+    except Exception as e:
+        logger.error(f"[genie_live] cycle failed — {e}", exc_info=True)
+        await _mark_hint_failed()
+        return None
 
     # Step 7: Persist meeting state
     try:

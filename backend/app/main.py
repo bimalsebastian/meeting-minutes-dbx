@@ -893,15 +893,14 @@ async def copilot_recording_signal(signal: CopilotRecordingSignal):
 
 
 @app.post("/api/genie-live/analyze")
-async def genie_live_analyze(request: dict):
+async def genie_live_analyze(request: dict, background_tasks: BackgroundTasks):
     """
     Frontend-driven Genie Live cycle endpoint.
 
     Body: {meeting_id, transcript_chunk, user_notes?: string[]}
     Returns: {hint_id, skipped, reason}
     """
-    from genie_live_agent import run_genie_live_cycle
-    import asyncio
+    from genie_live_agent import run_genie_live_cycle, init_genie_live, _genie_available
 
     meeting_id = request.get("meeting_id", "")
     transcript_chunk = request.get("transcript_chunk", "")
@@ -910,15 +909,25 @@ async def genie_live_analyze(request: dict):
     if not meeting_id:
         return {"skipped": True, "reason": "no meeting_id"}
 
-    await db.get_copilot_settings()
+    settings = await db.get_copilot_settings()
+
+    # Auto-initialize Genie if not already available (guards against backend restart
+    # happening between app launch and the first recording-signal reaching the backend)
+    if not _genie_available:
+        workspace_host = settings.get('databricksWorkspaceHost', '')
+        cli_profile = settings.get('databricksCliProfile', 'DEFAULT')
+        knowledge_store_path = settings.get('knowledgeStorePath', '')
+        if workspace_host:
+            logger.info(f"[genie_live] auto-init on analyze call (backend may have restarted)")
+            init_genie_live(workspace_host, cli_profile, settings, knowledge_store_path=knowledge_store_path)
 
     async def _run():
         try:
-            return await run_genie_live_cycle(meeting_id, db, transcript_chunk, user_notes=user_notes)
+            await run_genie_live_cycle(meeting_id, db, transcript_chunk, user_notes=user_notes)
         except Exception as e:
-            logger.error(f"[genie_live] analyze cycle failed: {e}")
+            logger.error(f"[genie_live] analyze cycle failed: {e}", exc_info=True)
 
-    asyncio.create_task(_run())
+    background_tasks.add_task(_run)
     note_count = len(user_notes)
     logger.info(f"[genie_live] analyze task fired for {meeting_id} ({len(transcript_chunk.split())} words, {note_count} user notes)")
     return {"skipped": False, "reason": "cycle started"}
