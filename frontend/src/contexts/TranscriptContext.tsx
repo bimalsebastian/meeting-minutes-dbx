@@ -8,6 +8,13 @@ import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
 import { indexedDBService } from '@/services/indexedDBService';
 
+export interface UserNote {
+  id: string;
+  text: string;
+  wallClockTime: string;  // "09:45" for display
+  addedAt: number;        // Date.now() for sorting
+}
+
 interface TranscriptContextType {
   transcripts: Transcript[];
   transcriptsRef: MutableRefObject<Transcript[]>
@@ -20,6 +27,10 @@ interface TranscriptContextType {
   clearTranscripts: () => void;
   currentMeetingId: string | null;
   markMeetingAsSaved: () => Promise<void>;
+  userNotes: UserNote[];
+  notesRef: MutableRefObject<UserNote[]>;
+  addUserNote: (text: string) => void;
+  clearUserNotes: () => void;
 }
 
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
@@ -28,20 +39,21 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
+  const [userNotes, setUserNotes] = useState<UserNote[]>([]);
 
   // Recording state context - provides backend-synced state
   const recordingState = useRecordingState();
 
   // Refs for transcript management
   const transcriptsRef = useRef<Transcript[]>(transcripts);
+  const notesRef = useRef<UserNote[]>(userNotes);
   const isUserAtBottomRef = useRef<boolean>(true);
   const transcriptContainerRef = useRef<HTMLDivElement>(null);
   const finalFlushRef = useRef<(() => void) | null>(null);
 
-  // Keep ref updated with current transcripts
-  useEffect(() => {
-    transcriptsRef.current = transcripts;
-  }, [transcripts]);
+  // Keep refs updated
+  useEffect(() => { transcriptsRef.current = transcripts; }, [transcripts]);
+  useEffect(() => { notesRef.current = userNotes; }, [userNotes]);
 
   // Smart auto-scroll: Track user scroll position
   useEffect(() => {
@@ -61,21 +73,19 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Auto-scroll when transcripts change (only if user is at bottom)
+  // Auto-scroll when transcripts change (only if user is at bottom and not typing)
   useEffect(() => {
-    // Only auto-scroll if user was at the bottom before new content
     if (isUserAtBottomRef.current && transcriptContainerRef.current) {
-      // Wait for Framer Motion animation to complete (150ms) before scrolling
-      // This ensures scrollHeight includes the full rendered height of the new transcript
+      // Don't scroll while user is typing in the note input or any other text field
+      const active = typeof document !== 'undefined' ? document.activeElement : null;
+      if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) return;
+
       const scrollTimeout = setTimeout(() => {
         const container = transcriptContainerRef.current;
         if (container) {
-          container.scrollTo({
-            top: container.scrollHeight,
-            behavior: 'smooth'
-          });
+          container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
         }
-      }, 150); // Match Framer Motion transition duration
+      }, 150);
 
       return () => clearTimeout(scrollTimeout);
     }
@@ -480,11 +490,29 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const addUserNote = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const now = new Date();
+    const note: UserNote = {
+      id: `note-${Date.now()}`,
+      text: trimmed,
+      wallClockTime: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      addedAt: now.getTime(),
+    };
+    setUserNotes(prev => [...prev, note]);
+  }, []);
+
+  const clearUserNotes = useCallback(() => {
+    setUserNotes([]);
+  }, []);
+
   // Clear transcripts (used when starting new recording)
   const clearTranscripts = useCallback(() => {
     setTranscripts([]);
+    clearUserNotes();
     // Don't clear currentMeetingId here - it will be set by recording-started event
-  }, []);
+  }, [clearUserNotes]);
 
   // Mark current meeting as saved in IndexedDB
   const markMeetingAsSaved = useCallback(async () => {
@@ -521,6 +549,10 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     clearTranscripts,
     currentMeetingId,
     markMeetingAsSaved,
+    userNotes,
+    notesRef,
+    addUserNote,
+    clearUserNotes,
   };
 
   return (

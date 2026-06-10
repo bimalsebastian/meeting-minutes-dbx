@@ -70,19 +70,19 @@ function MeetingDetailsContent() {
       return;
     }
 
-    // Respect user's auto-summary toggle preference
-    if (!isAutoSummary) {
-      console.log('Auto-summary is disabled in settings');
-      setHasCheckedAutoGen(true);
-      return;
-    }
-
     try {
       // Check what's currently in database
       const currentConfig = await invoke('api_get_model_config') as any;
 
       // If DB already has a model, use it (never override!)
       if (currentConfig && currentConfig.model) {
+        // Only auto-generate if the meeting doesn't already have a summary
+        const existingSummary = await invoke('api_get_summary', { meetingId }) as any;
+        if (existingSummary?.status === 'completed' && existingSummary?.data) {
+          console.log('Meeting already has a summary, skipping auto-generation');
+          setHasCheckedAutoGen(true);
+          return;
+        }
         console.log('Using existing model from DB:', currentConfig.model);
         setShouldAutoGenerate(true);
         setHasCheckedAutoGen(true);
@@ -114,7 +114,7 @@ function MeetingDetailsContent() {
     }
 
     setHasCheckedAutoGen(true);
-  }, [hasCheckedAutoGen, checkForGemmaModel, source, isAutoSummary]);
+  }, [hasCheckedAutoGen, checkForGemmaModel, source, meetingId]);
 
   // Sync meeting metadata from pagination hook to meeting details state
   useEffect(() => {

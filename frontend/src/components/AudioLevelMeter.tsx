@@ -70,7 +70,7 @@ export function AudioLevelMeter({
       {/* Level meter container */}
       <div className={`flex-1 ${sizes.container} relative`}>
         {/* Background */}
-        <div className="w-full h-full bg-gray-200 rounded-sm overflow-hidden">
+        <div className="w-full h-full bg-[var(--panel-elevated)] rounded-sm overflow-hidden">
           {/* RMS level bar (main level) */}
           <div
             className={`${sizes.meter} ${rmsColor} transition-all duration-150 ease-out rounded-sm`}
@@ -98,7 +98,7 @@ export function AudioLevelMeter({
       </div>
 
       {/* Level percentage display */}
-      <div className={`${sizes.text} text-gray-600 font-mono min-w-[3rem] text-right`}>
+      <div className={`${sizes.text} text-[var(--text-secondary)] font-mono min-w-[3rem] text-right`}>
         {rmsPercent}%
       </div>
     </div>
@@ -137,7 +137,7 @@ export function CompactAudioLevelMeter({
       }`} />
 
       {/* Mini meter */}
-      <div className="w-8 h-1.5 bg-gray-200 rounded-sm overflow-hidden">
+      <div className="w-8 h-1.5 bg-[var(--panel-elevated)] rounded-sm overflow-hidden">
         <div
           className={`h-full ${getLevelColor(logRms)} transition-all duration-150`}
           style={{ width: `${rmsPercent}%` }}

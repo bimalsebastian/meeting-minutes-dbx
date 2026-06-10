@@ -208,11 +208,53 @@ class DatabaseManager:
                 CREATE TABLE IF NOT EXISTS copilot_hints (
                     id TEXT PRIMARY KEY,
                     meeting_id TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    topic_detected TEXT NOT NULL,
-                    talking_points TEXT NOT NULL,
-                    genie_used INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP,
+                    updated_at TIMESTAMP,
+                    cycle_number INTEGER,
+                    extracted_query TEXT,
+                    talking_points TEXT,
+                    genie_status TEXT DEFAULT 'pending',
+                    genie_raw_answer TEXT,
+                    genie_sources TEXT DEFAULT '[]',
+                    genie_conversation_id TEXT,
+                    genie_poll_attempts INTEGER,
+                    genie_response_time_seconds REAL,
+                    llm_fallback_used INTEGER DEFAULT 0,
+                    topic_detected TEXT,
+                    genie_used INTEGER DEFAULT 0,
                     genie_answer TEXT,
+                    FOREIGN KEY (meeting_id) REFERENCES meetings(id)
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS genie_chat_messages (
+                    id TEXT PRIMARY KEY,
+                    hint_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    FOREIGN KEY (hint_id) REFERENCES copilot_hints(id)
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS meeting_genie_chat (
+                    id TEXT PRIMARY KEY,
+                    meeting_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS meeting_notes (
+                    id TEXT PRIMARY KEY,
+                    meeting_id TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    wall_clock_time TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (meeting_id) REFERENCES meetings(id)
                 )
             """)
@@ -230,6 +272,77 @@ class DatabaseManager:
             except sqlite3.OperationalError: pass
             try: cursor.execute("ALTER TABLE settings ADD COLUMN copilotIntervalMinutes INTEGER DEFAULT 5")
             except sqlite3.OperationalError: pass
+            try: cursor.execute("ALTER TABLE settings ADD COLUMN knowledgeStorePath TEXT DEFAULT ''")
+            except sqlite3.OperationalError: pass
+            try: cursor.execute("ALTER TABLE settings ADD COLUMN telemetryEnabled INTEGER DEFAULT 1")
+            except sqlite3.OperationalError: pass
+            try: cursor.execute("ALTER TABLE settings ADD COLUMN telemetryPath TEXT DEFAULT ''")
+            except sqlite3.OperationalError: pass
+            try: cursor.execute("ALTER TABLE settings ADD COLUMN telemetryConsentShown INTEGER DEFAULT 0")
+            except sqlite3.OperationalError: pass
+            try: cursor.execute("ALTER TABLE settings ADD COLUMN installId TEXT")
+            except sqlite3.OperationalError: pass
+
+            # Migrate copilot_hints to new schema
+            try:
+                cols_cursor = cursor.execute("PRAGMA table_info(copilot_hints)")
+                existing_cols = {row[1] for row in cols_cursor.fetchall()}
+
+                new_cols = {
+                    "updated_at": "TIMESTAMP",
+                    "cycle_number": "INTEGER",
+                    "extracted_query": "TEXT",
+                    "genie_status": "TEXT DEFAULT 'pending'",
+                    "genie_raw_answer": "TEXT",
+                    "genie_sources": "TEXT DEFAULT '[]'",
+                    "genie_conversation_id": "TEXT",
+                    "genie_poll_attempts": "INTEGER",
+                    "genie_response_time_seconds": "REAL",
+                    "llm_fallback_used": "INTEGER DEFAULT 0",
+                }
+                for col, col_type in new_cols.items():
+                    if col not in existing_cols:
+                        cursor.execute(f"ALTER TABLE copilot_hints ADD COLUMN {col} {col_type}")
+            except Exception as e:
+                logger.warning(f"copilot_hints migration: {e}")
+
+            # meeting_agent_state table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS meeting_agent_state (
+                    meeting_id TEXT PRIMARY KEY,
+                    genie_conversation_id TEXT,
+                    cycles_completed INTEGER DEFAULT 0,
+                    topics_addressed TEXT DEFAULT '[]',
+                    kb_files_loaded TEXT DEFAULT '[]',
+                    customer_identified TEXT,
+                    last_cycle_at TEXT,
+                    created_at TEXT,
+                    updated_at TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_agent_state_last_cycle
+                ON meeting_agent_state(last_cycle_at)
+            """)
+
+            # Migrate copilot_hints with new columns
+            for col, col_type in [
+                ("genie_status", "TEXT DEFAULT 'complete'"),
+                ("cycle_number", "INTEGER"),
+                ("genie_conversation_id", "TEXT"),
+                ("genie_poll_attempts", "INTEGER"),
+                ("genie_response_time_seconds", "REAL"),
+                ("genie_sources", "TEXT DEFAULT '[]'"),
+                ("llm_fallback_used", "INTEGER DEFAULT 0"),
+                ("quality_score", "INTEGER"),
+                ("loop_count_used", "INTEGER"),
+                ("extracted_query", "TEXT"),
+                ("updated_at", "TIMESTAMP"),
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE copilot_hints ADD COLUMN {col} {col_type}")
+                except Exception:
+                    pass  # column already exists
 
             conn.commit()
 
@@ -1308,7 +1421,7 @@ class DatabaseManager:
 
     async def save_copilot_hint(self, meeting_id: str, topic_detected: str, talking_points: list,
                                  genie_used: bool, genie_answer: Optional[str]) -> str:
-        """Insert a copilot hint. Returns the new hint id."""
+        """Legacy insert — kept for backward compatibility. Prefer create_copilot_hint."""
         hint_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
         points_json = json.dumps(talking_points)
@@ -1317,9 +1430,12 @@ class DatabaseManager:
                 await conn.execute("BEGIN TRANSACTION")
                 try:
                     await conn.execute(
-                        """INSERT INTO copilot_hints (id, meeting_id, created_at, topic_detected, talking_points, genie_used, genie_answer)
-                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                        (hint_id, meeting_id, now, topic_detected, points_json, 1 if genie_used else 0, genie_answer)
+                        """INSERT INTO copilot_hints
+                           (id, meeting_id, created_at, updated_at, topic_detected, talking_points,
+                            genie_used, genie_answer, genie_sources, genie_status)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (hint_id, meeting_id, now, now, topic_detected, points_json,
+                         1 if genie_used else 0, genie_answer, '[]', 'complete')
                     )
                     await conn.commit()
                     logger.info(f"Saved copilot hint {hint_id} for meeting {meeting_id}")
@@ -1332,32 +1448,237 @@ class DatabaseManager:
             raise
         return hint_id
 
+    async def create_copilot_hint(self, hint_id: str, meeting_id: str, cycle_number: int,
+                                   extracted_query: str, genie_status: str = "pending") -> None:
+        """Insert a new copilot hint row (new schema)."""
+        now = datetime.utcnow().isoformat()
+        async with self._get_connection() as conn:
+            await conn.execute(
+                """INSERT INTO copilot_hints
+                   (id, meeting_id, created_at, updated_at, cycle_number, extracted_query,
+                    topic_detected, genie_status, genie_used, talking_points, genie_sources)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+                (hint_id, meeting_id, now, now, cycle_number, extracted_query,
+                 extracted_query, genie_status, '[]', '[]')
+            )
+            await conn.commit()
+
+    async def update_copilot_hint(self, hint_id: str, fields: dict) -> None:
+        """Update specific fields of a copilot_hint row."""
+        if not fields:
+            return
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        values = list(fields.values()) + [hint_id]
+        async with self._get_connection() as conn:
+            await conn.execute(
+                f"UPDATE copilot_hints SET {set_clause} WHERE id = ?",
+                values
+            )
+            await conn.commit()
+
     async def get_copilot_hints(self, meeting_id: str) -> list:
-        """Return hints for meeting, newest first. talking_points is list (deserialized from JSON)."""
+        """Return hints for meeting, newest first. Returns all new schema fields."""
         try:
             async with self._get_connection() as conn:
-                cursor = await conn.execute("""
-                    SELECT id, meeting_id, created_at, topic_detected, talking_points, genie_used, genie_answer
-                    FROM copilot_hints
-                    WHERE meeting_id = ?
-                    ORDER BY created_at DESC
-                """, (meeting_id,))
+                cursor = await conn.execute(
+                    """SELECT id, meeting_id, created_at, updated_at, cycle_number,
+                              extracted_query, talking_points, genie_status,
+                              genie_raw_answer, genie_sources, genie_conversation_id,
+                              genie_poll_attempts, genie_response_time_seconds, llm_fallback_used,
+                              quality_score, loop_count_used
+                       FROM copilot_hints WHERE meeting_id = ?
+                       ORDER BY created_at DESC""",
+                    (meeting_id,)
+                )
                 rows = await cursor.fetchall()
-                results = []
-                for row in rows:
-                    results.append({
-                        'id': row[0],
-                        'meeting_id': row[1],
-                        'created_at': row[2],
-                        'topic_detected': row[3],
-                        'talking_points': json.loads(row[4]) if row[4] else [],
-                        'genie_used': bool(row[5]),
-                        'genie_answer': row[6]
+                result = []
+                for r in rows:
+                    import json as _json
+                    result.append({
+                        "id": r[0], "meeting_id": r[1], "created_at": r[2],
+                        "updated_at": r[3], "cycle_number": r[4],
+                        "extracted_query": r[5],
+                        "talking_points": _json.loads(r[6] or "[]"),
+                        "genie_status": r[7] or "pending",
+                        "genie_raw_answer": r[8],
+                        "genie_sources": _json.loads(r[9] or "[]"),
+                        "genie_conversation_id": r[10],
+                        "genie_poll_attempts": r[11],
+                        "genie_response_time_seconds": r[12],
+                        "llm_fallback_used": bool(r[13]),
+                        "quality_score": r[14],
+                        "loop_count_used": r[15],
                     })
-                return results
+                return result
         except Exception as e:
             logger.error(f"Error getting copilot hints: {str(e)}")
             raise
+
+    async def save_meeting_note(self, meeting_id: str, note_id: str, text: str, wall_clock_time: str = "") -> None:
+        """Persist a user-typed note for a meeting."""
+        import datetime as _dt
+        async with self._get_connection() as conn:
+            await conn.execute(
+                """INSERT OR REPLACE INTO meeting_notes (id, meeting_id, text, wall_clock_time, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (note_id, meeting_id, text, wall_clock_time, _dt.datetime.utcnow().isoformat()),
+            )
+            await conn.commit()
+
+    async def get_meeting_notes(self, meeting_id: str) -> list:
+        """Return all user notes for a meeting, oldest first."""
+        async with self._get_connection() as conn:
+            cursor = await conn.execute(
+                "SELECT id, text, wall_clock_time, created_at FROM meeting_notes WHERE meeting_id=? ORDER BY created_at ASC",
+                (meeting_id,),
+            )
+            rows = await cursor.fetchall()
+            return [{"id": r[0], "text": r[1], "wall_clock_time": r[2], "created_at": r[3]} for r in rows]
+
+    async def save_meeting_chat_message(self, meeting_id: str, msg_id: str, role: str, content: str) -> None:
+        async with self._get_connection() as conn:
+            await conn.execute(
+                "INSERT INTO meeting_genie_chat (id, meeting_id, role, content) VALUES (?, ?, ?, ?)",
+                (msg_id, meeting_id, role, content),
+            )
+            await conn.commit()
+
+    async def get_meeting_chat_messages(self, meeting_id: str) -> list:
+        async with self._get_connection() as conn:
+            cursor = await conn.execute(
+                "SELECT id, role, content, created_at FROM meeting_genie_chat WHERE meeting_id=? ORDER BY created_at ASC",
+                (meeting_id,),
+            )
+            rows = await cursor.fetchall()
+            return [{"id": r[0], "role": r[1], "content": r[2], "created_at": r[3]} for r in rows]
+
+    async def save_chat_message(self, hint_id: str, msg_id: str, role: str, content: str) -> None:
+        async with self._get_connection() as conn:
+            await conn.execute(
+                "INSERT INTO genie_chat_messages (id, hint_id, role, content) VALUES (?, ?, ?, ?)",
+                (msg_id, hint_id, role, content),
+            )
+            await conn.commit()
+
+    async def get_chat_messages(self, hint_id: str) -> list:
+        async with self._get_connection() as conn:
+            cursor = await conn.execute(
+                "SELECT id, role, content, created_at FROM genie_chat_messages WHERE hint_id=? ORDER BY created_at ASC",
+                (hint_id,),
+            )
+            rows = await cursor.fetchall()
+            return [{"id": r[0], "role": r[1], "content": r[2], "created_at": r[3]} for r in rows]
+
+    async def get_copilot_hint_by_id(self, hint_id: str) -> Optional[dict]:
+        async with self._get_connection() as conn:
+            cursor = await conn.execute(
+                "SELECT id, meeting_id, genie_conversation_id, extracted_query FROM copilot_hints WHERE id=?",
+                (hint_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {"id": row[0], "meeting_id": row[1], "genie_conversation_id": row[2], "extracted_query": row[3]}
+
+    async def get_setting(self, key: str) -> Optional[str]:
+        """Get a single value from settings row id='1' by column name."""
+        try:
+            async with self._get_connection() as conn:
+                cursor = await conn.execute(
+                    f"SELECT {key} FROM settings WHERE id = '1'"
+                )
+                row = await cursor.fetchone()
+                if row is None or row[0] is None:
+                    return None
+                return str(row[0])
+        except Exception as e:
+            logger.debug(f"get_setting({key}): {e}")
+            return None
+
+    async def set_setting(self, key: str, value: str) -> None:
+        """Set a single column value in settings row id='1'."""
+        try:
+            async with self._get_connection() as conn:
+                cursor = await conn.execute("SELECT id FROM settings WHERE id = '1'")
+                existing = await cursor.fetchone()
+                if existing:
+                    await conn.execute(
+                        f"UPDATE settings SET {key} = ? WHERE id = '1'", (value,)
+                    )
+                else:
+                    await conn.execute(
+                        f"INSERT INTO settings (id, {key}) VALUES ('1', ?)", (value,)
+                    )
+                await conn.commit()
+        except Exception as e:
+            logger.debug(f"set_setting({key}): {e}")
+
+    async def get_or_create_install_id(self) -> str:
+        """
+        Returns a random 8-char ID generated once on first run.
+        Stored in settings table. Never linked to a person.
+        """
+        import uuid as _uuid
+        result = await self.get_setting("installId")
+        if not result:
+            install_id = str(_uuid.uuid4())[:8]
+            await self.set_setting("installId", install_id)
+            logger.info(f"Telemetry: generated install_id={install_id}")
+            return install_id
+        return result
+
+    async def get_telemetry_settings(self) -> dict:
+        """Read telemetry settings from settings row id='1'."""
+        try:
+            async with self._get_connection() as conn:
+                cursor = await conn.execute(
+                    "SELECT telemetryEnabled, telemetryPath, telemetryConsentShown, installId "
+                    "FROM settings WHERE id = '1'"
+                )
+                row = await cursor.fetchone()
+                if row is None:
+                    return {
+                        "telemetryEnabled": True,
+                        "telemetryPath": "",
+                        "telemetryConsentShown": False,
+                        "installId": None,
+                    }
+                return {
+                    "telemetryEnabled": bool(row[0]) if row[0] is not None else True,
+                    "telemetryPath": row[1] or "",
+                    "telemetryConsentShown": bool(row[2]) if row[2] is not None else False,
+                    "installId": row[3],
+                }
+        except Exception as e:
+            logger.debug(f"get_telemetry_settings: {e}")
+            return {"telemetryEnabled": True, "telemetryPath": "", "telemetryConsentShown": False, "installId": None}
+
+    async def save_telemetry_settings(
+        self,
+        telemetry_enabled: bool,
+        telemetry_path: str,
+        telemetry_consent_shown: bool,
+    ) -> None:
+        """Persist telemetry settings."""
+        enabled_val = 1 if telemetry_enabled else 0
+        shown_val = 1 if telemetry_consent_shown else 0
+        try:
+            async with self._get_connection() as conn:
+                cursor = await conn.execute("SELECT id FROM settings WHERE id = '1'")
+                existing = await cursor.fetchone()
+                if existing:
+                    await conn.execute(
+                        "UPDATE settings SET telemetryEnabled=?, telemetryPath=?, telemetryConsentShown=? WHERE id='1'",
+                        (enabled_val, telemetry_path, shown_val),
+                    )
+                else:
+                    await conn.execute(
+                        "INSERT INTO settings (id, telemetryEnabled, telemetryPath, telemetryConsentShown) VALUES ('1',?,?,?)",
+                        (enabled_val, telemetry_path, shown_val),
+                    )
+                await conn.commit()
+        except Exception as e:
+            logger.debug(f"save_telemetry_settings: {e}")
 
     async def get_copilot_settings(self) -> dict:
         """Read copilot + LLM settings from settings row id='1'.
@@ -1367,6 +1688,7 @@ class DatabaseManager:
             'copilotIntervalMinutes': 5,
             'databricksCliProfile': 'DEFAULT',
             'databricksWorkspaceHost': None,
+            'knowledgeStorePath': '',
             'provider': None,
             'model': None,
             'anthropicApiKey': None,
@@ -1379,7 +1701,8 @@ class DatabaseManager:
                 cursor = await conn.execute("""
                     SELECT provider, model, copilotEnabled, copilotIntervalMinutes,
                            databricksCliProfile, databricksWorkspaceHost,
-                           anthropicApiKey, openaiApiKey, groqApiKey, ollamaApiKey
+                           anthropicApiKey, openaiApiKey, groqApiKey, ollamaApiKey,
+                           knowledgeStorePath
                     FROM settings WHERE id = '1'
                 """)
                 row = await cursor.fetchone()
@@ -1396,12 +1719,13 @@ class DatabaseManager:
                     'openaiApiKey': row[7],
                     'groqApiKey': row[8],
                     'ollamaApiKey': row[9],
+                    'knowledgeStorePath': row[10] or '',
                 }
         except Exception as e:
             logger.error(f"Error getting copilot settings: {str(e)}")
             return defaults
 
-    async def save_copilot_settings(self, databricks_workspace_host: Optional[str], databricks_cli_profile: str, copilot_enabled: bool, copilot_interval_minutes: int) -> None:
+    async def save_copilot_settings(self, databricks_workspace_host: Optional[str], databricks_cli_profile: str, copilot_enabled: bool, copilot_interval_minutes: int, knowledge_store_path: str = '') -> None:
         """Upsert copilot settings fields in settings row id='1'."""
         try:
             async with self._get_connection() as conn:
@@ -1415,14 +1739,15 @@ class DatabaseManager:
                             SET databricksWorkspaceHost = ?,
                                 databricksCliProfile = ?,
                                 copilotEnabled = ?,
-                                copilotIntervalMinutes = ?
+                                copilotIntervalMinutes = ?,
+                                knowledgeStorePath = ?
                             WHERE id = '1'
-                        """, (databricks_workspace_host, databricks_cli_profile, 1 if copilot_enabled else 0, copilot_interval_minutes))
+                        """, (databricks_workspace_host, databricks_cli_profile, 1 if copilot_enabled else 0, copilot_interval_minutes, knowledge_store_path))
                     else:
                         await conn.execute("""
-                            INSERT INTO settings (id, provider, model, whisperModel, databricksWorkspaceHost, databricksCliProfile, copilotEnabled, copilotIntervalMinutes)
-                            VALUES ('1', 'ollama', 'llama3.2', 'large-v3', ?, ?, ?, ?)
-                        """, (databricks_workspace_host, databricks_cli_profile, 1 if copilot_enabled else 0, copilot_interval_minutes))
+                            INSERT INTO settings (id, provider, model, whisperModel, databricksWorkspaceHost, databricksCliProfile, copilotEnabled, copilotIntervalMinutes, knowledgeStorePath)
+                            VALUES ('1', 'ollama', 'llama3.2', 'large-v3', ?, ?, ?, ?, ?)
+                        """, (databricks_workspace_host, databricks_cli_profile, 1 if copilot_enabled else 0, copilot_interval_minutes, knowledge_store_path))
                     await conn.commit()
                     logger.info("Saved copilot settings")
                 except Exception as e:
@@ -1451,3 +1776,79 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting recent transcripts: {str(e)}")
             return ''
+
+    async def get_meeting_agent_state(self, meeting_id: str):
+        """Load persisted Genie Live state for a meeting."""
+        try:
+            async with self._get_connection() as conn:
+                cursor = await conn.execute(
+                    "SELECT meeting_id, genie_conversation_id, cycles_completed, "
+                    "topics_addressed, kb_files_loaded, customer_identified, last_cycle_at "
+                    "FROM meeting_agent_state WHERE meeting_id = ?",
+                    (meeting_id,)
+                )
+                row = await cursor.fetchone()
+                if not row:
+                    return None
+                import json as _json
+                return {
+                    "meeting_id": row[0],
+                    "genie_conversation_id": row[1],
+                    "cycles_completed": row[2] or 0,
+                    "topics_addressed": _json.loads(row[3] or "[]"),
+                    "kb_files_loaded": _json.loads(row[4] or "[]"),
+                    "customer_identified": row[5],
+                    "last_cycle_at": row[6] or "",
+                }
+        except Exception as e:
+            logger.error(f"get_meeting_agent_state error: {e}")
+            return None
+
+    async def upsert_meeting_agent_state(self, state: dict) -> None:
+        """Insert or update Genie Live meeting agent state."""
+        import json as _json
+        now = datetime.utcnow().isoformat()
+        try:
+            async with self._get_connection() as conn:
+                await conn.execute(
+                    """INSERT INTO meeting_agent_state
+                       (meeting_id, genie_conversation_id, cycles_completed,
+                        topics_addressed, kb_files_loaded, customer_identified,
+                        last_cycle_at, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(meeting_id) DO UPDATE SET
+                       genie_conversation_id=excluded.genie_conversation_id,
+                       cycles_completed=excluded.cycles_completed,
+                       topics_addressed=excluded.topics_addressed,
+                       kb_files_loaded=excluded.kb_files_loaded,
+                       customer_identified=excluded.customer_identified,
+                       last_cycle_at=excluded.last_cycle_at,
+                       updated_at=excluded.updated_at""",
+                    (
+                        state["meeting_id"],
+                        state.get("genie_conversation_id"),
+                        state.get("cycles_completed", 0),
+                        _json.dumps(state.get("topics_addressed", [])),
+                        _json.dumps(state.get("kb_files_loaded", [])),
+                        state.get("customer_identified"),
+                        state.get("last_cycle_at", now),
+                        now, now,
+                    )
+                )
+                await conn.commit()
+        except Exception as e:
+            logger.error(f"upsert_meeting_agent_state error: {e}")
+
+    async def cleanup_old_agent_state(self, days: int = 30) -> None:
+        """Delete agent state older than N days."""
+        from datetime import timedelta
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        try:
+            async with self._get_connection() as conn:
+                await conn.execute(
+                    "DELETE FROM meeting_agent_state WHERE last_cycle_at < ?",
+                    (cutoff,)
+                )
+                await conn.commit()
+        except Exception as e:
+            logger.error(f"cleanup_old_agent_state error: {e}")

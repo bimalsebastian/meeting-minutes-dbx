@@ -32,6 +32,20 @@ static MEETING_FOLDER: Mutex<Option<PathBuf>> = Mutex::new(None);
 // PUBLIC API
 // ============================================================================
 
+/// Read the current clipboard image (if any) and return its SHA-256 hash.
+/// Returns None if the clipboard is empty or contains non-image data.
+/// Used to pre-seed the dedup hash set so pre-existing images are never captured.
+fn snapshot_clipboard_hash() -> Option<String> {
+    let mut clipboard = arboard::Clipboard::new().ok()?;
+    let image = clipboard.get_image().ok()?;
+    let png_bytes = rgba_to_png(
+        image.bytes.as_ref(),
+        image.width as u32,
+        image.height as u32,
+    ).ok()?;
+    Some(format!("{:x}", Sha256::digest(&png_bytes)))
+}
+
 /// Start the clipboard monitor for a new recording session.
 /// Cancels any previously running monitor first.
 pub fn start_monitor<R: tauri::Runtime>(
@@ -52,8 +66,16 @@ pub fn start_monitor<R: tauri::Runtime>(
         *folder_guard = Some(meeting_folder.clone());
     }
     {
+        // Pre-seed the hash set with whatever is currently in the clipboard.
+        // This ensures any image that was already copied *before* recording started
+        // is treated as "already seen" and never captured into this session.
+        let mut initial: VecDeque<(String, Instant)> = VecDeque::new();
+        if let Some(hash) = snapshot_clipboard_hash() {
+            log::debug!("Clipboard monitor: pre-seeding hash {} (pre-existing clipboard image will be ignored)", &hash[..8]);
+            initial.push_back((hash, Instant::now()));
+        }
         let mut hashes_guard = RECENT_HASHES.lock().unwrap();
-        *hashes_guard = Some(VecDeque::new());
+        *hashes_guard = Some(initial);
     }
 
     // Create a new cancellation token and store it
@@ -85,6 +107,28 @@ pub fn stop_monitor() {
     if let Some(token) = token {
         log::info!("Stopping clipboard monitor");
         token.cancel();
+    }
+}
+
+/// Return the absolute paths of all PNG files saved for a given meeting UUID.
+/// Used by the frontend AttachmentsPanel as a fallback when the Python backend is not running.
+pub fn list_meeting_pngs(meeting_id: &str) -> Vec<String> {
+    let folder = crate::audio::recording_preferences::get_default_recordings_folder()
+        .join(meeting_id);
+
+    match std::fs::read_dir(&folder) {
+        Ok(entries) => entries
+            .flatten()
+            .filter_map(|e| {
+                let path = e.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("png") {
+                    path.to_str().map(|s| s.to_owned())
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        Err(_) => vec![],
     }
 }
 
@@ -131,22 +175,18 @@ async fn check_clipboard_for_image<R: tauri::Runtime>(
     // Compute SHA-256 hash for deduplication
     let hash = format!("{:x}", Sha256::digest(&png_bytes));
 
-    // Check RECENT_HASHES — purge old entries and check for duplicates
+    // Check RECENT_HASHES — deduplicate for the entire session (no expiry)
     {
         let mut hashes_guard = RECENT_HASHES.lock().unwrap();
         let hashes = hashes_guard.get_or_insert_with(VecDeque::new);
 
-        // Purge entries older than 10 seconds
-        let now = Instant::now();
-        hashes.retain(|(_, ts)| now.duration_since(*ts).as_secs() < 10);
-
-        // If this hash was seen recently, skip
+        // Skip if this exact image was seen at any point during this recording session
         if hashes.iter().any(|(h, _)| h == &hash) {
             return Ok(());
         }
 
-        // Record this hash
-        hashes.push_back((hash.clone(), now));
+        // Record this hash (kept for the full session — cleared on start_monitor)
+        hashes.push_back((hash.clone(), Instant::now()));
     }
 
     // Determine meeting folder

@@ -27,6 +27,10 @@ export interface VirtualizedTranscriptViewProps {
     showConfidence?: boolean;
     /** Completely disable auto-scroll behavior (for meeting details page) */
     disableAutoScroll?: boolean;
+    /** Hide the sticky RecordingStatusBar (use when recording status is shown elsewhere) */
+    hideStatusBar?: boolean;
+    /** Compact mode: smaller font, tighter spacing for strip/bottom-bar layout */
+    compact?: boolean;
 
     // Pagination props (infinite scroll)
     hasMore?: boolean;
@@ -71,6 +75,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence,
     isStreaming,
     showConfidence,
+    compact,
 }: {
     id: string;
     timestamp: number;
@@ -78,15 +83,18 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence?: number;
     isStreaming: boolean;
     showConfidence: boolean;
+    compact?: boolean;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
+    const textSize = compact ? 'text-xs' : 'text-base';
+    const mb = compact ? 'mb-1' : 'mb-3';
 
     return (
-        <div id={`segment-${id}`} className="mb-3">
-            <div className="flex items-start gap-2">
+        <div id={`segment-${id}`} className={mb}>
+            <div className="flex items-start gap-1.5">
                 <Tooltip>
                     <TooltipTrigger>
-                        <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
+                        <span className="text-xs mt-0.5 flex-shrink-0 min-w-[42px] font-mono" style={{ color: 'var(--text-secondary)', fontSize: compact ? 10 : undefined }}>
                             {formatRecordingTime(timestamp)}
                         </span>
                     </TooltipTrigger>
@@ -98,11 +106,11 @@ const TranscriptSegment = memo(function TranscriptSegment({
                 </Tooltip>
                 <div className="flex-1">
                     {isStreaming ? (
-                        <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
-                            <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
+                        <div className="rounded-lg px-2 py-1" style={{ background: 'var(--panel-elevated)', border: '1px solid var(--separator)' }}>
+                            <p className={`${textSize} leading-snug`} style={{ color: 'var(--text-primary)' }}>{displayText}</p>
                         </div>
                     ) : (
-                        <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
+                        <p className={`${textSize} leading-snug`} style={{ color: 'var(--text-primary)' }}>{displayText}</p>
                     )}
                 </div>
             </div>
@@ -119,6 +127,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     enableStreaming = false,
     showConfidence = true,
     disableAutoScroll = false,
+    hideStatusBar = false,
+    compact = false,
     hasMore = false,
     isLoadingMore = false,
     totalCount = 0,
@@ -227,8 +237,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         <div ref={scrollRef} className="flex flex-col h-full overflow-y-auto px-4 py-2">
             {/* Recording Status Bar - Sticky at top, always visible when recording */}
             <AnimatePresence>
-                {isRecording && (
-                    <div className="sticky top-0 z-10 bg-white pb-2">
+                {isRecording && !hideStatusBar && (
+                    <div className="sticky top-0 z-10 pb-2 bg-[var(--panel-bg)]">
                         <RecordingStatusBar isPaused={isPaused} />
                     </div>
                 )}
@@ -296,6 +306,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        compact={compact}
                                     />
                                 </div>
                             );
@@ -352,6 +363,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        compact={compact}
                                     />
                                 </motion.div>
                             );

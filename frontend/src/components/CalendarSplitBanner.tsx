@@ -56,11 +56,14 @@ export default function CalendarSplitBanner({
   };
 
   return (
-    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mx-4 my-2 shadow-sm">
+    <div
+      className="rounded-lg p-3 mx-4 my-2"
+      style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.35)', boxShadow: 'var(--hint-shadow)' }}
+    >
       <div className="flex items-start gap-3">
-        <CalendarIcon className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+        <CalendarIcon className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: '#D97706' }} />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-amber-800">
+          <p className="text-sm font-medium" style={{ color: '#D97706' }}>
             Meeting{' '}
             {state.pendingEventTitle && (
               <strong>&ldquo;{state.pendingEventTitle}&rdquo;</strong>
@@ -73,7 +76,7 @@ export default function CalendarSplitBanner({
               </span>
             )}
           </p>
-          <p className="text-xs text-amber-600 mt-0.5">
+          <p className="text-xs mt-0.5" style={{ color: '#D97706', opacity: 0.85 }}>
             {state.graceSecondsRemaining > 0
               ? `Auto-splitting in ${countdownStr} — or split now to start the next meeting.`
               : 'Splitting now...'}
@@ -82,19 +85,17 @@ export default function CalendarSplitBanner({
             <button
               onClick={handleSplitNow}
               disabled={splitting}
-              className="px-3 py-1 text-xs bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1 transition-colors"
+              className="px-3 py-1 text-xs text-white rounded-md disabled:opacity-50 flex items-center gap-1 transition-opacity hover:opacity-90"
+              style={{ background: '#D97706' }}
             >
-              {splitting ? (
-                <Loader2 className="w-3 h-3 animate-spin" />
-              ) : (
-                <Scissors className="w-3 h-3" />
-              )}
+              {splitting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Scissors className="w-3 h-3" />}
               {splitting ? 'Splitting...' : 'Split Now'}
             </button>
             <button
               onClick={onKeepRecording}
               disabled={splitting}
-              className="px-3 py-1 text-xs border border-amber-400 text-amber-700 rounded-md hover:bg-amber-100 disabled:opacity-50 flex items-center gap-1 transition-colors"
+              className="px-3 py-1 text-xs rounded-md disabled:opacity-50 flex items-center gap-1 transition-opacity hover:opacity-80"
+              style={{ border: '1px solid rgba(245,158,11,0.5)', color: '#D97706' }}
             >
               <X className="w-3 h-3" />
               Keep Recording

@@ -142,6 +142,23 @@ class TranscriptProcessor:
                 llm = OpenAIModel(model_name, provider=OpenAIProvider(api_key=api_key))
                 logger.info(f"Using OpenAI model: {model_name}")
             # --- END OPENAI SUPPORT ---
+            elif model == "databricks":
+                # Use Databricks CLI auth — same pattern as Genie Live.
+                # model_name is the serving endpoint name (e.g. databricks-claude-sonnet-4-6).
+                from databricks.sdk import WorkspaceClient
+                ws = WorkspaceClient()  # picks up active CLI profile automatically
+                token = ws.config.token
+                host = (ws.config.host or "").rstrip("/")
+                if not host:
+                    raise ValueError("Databricks CLI profile not configured or workspace host unavailable")
+                llm = OpenAIModel(
+                    model_name=model_name,
+                    provider=OpenAIProvider(
+                        base_url=f"{host}/serving-endpoints",
+                        api_key=token,
+                    ),
+                )
+                logger.info(f"Using Databricks serving endpoint: {model_name} @ {host}")
             else:
                 logger.error(f"Unsupported model provider requested: {model}")
                 raise ValueError(f"Unsupported model provider: {model}")

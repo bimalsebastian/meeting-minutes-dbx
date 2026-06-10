@@ -147,9 +147,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('isAutoSummary');
-      return saved !== null ? saved === 'true' : false
+      return saved !== null ? saved === 'true' : true; // default ON — generate on every new recording
     }
-    return false;
+    return true;
   });
 
   // Preference settings state (lazy loaded)
@@ -462,7 +462,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     'builtin-ai': [],
     'custom-openai': [],
-    databricks: [], // Endpoint name set in Azure CLI auth (Model Settings)
+    databricks: ['databricks-claude-sonnet-4-6', 'databricks-meta-llama-3-3-70b-instruct', 'databricks-claude-haiku-3-5'],
   };
 
   // Toggle confidence indicator with localStorage persistence

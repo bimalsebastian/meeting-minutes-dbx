@@ -9,9 +9,7 @@ module.exports = {
   theme: {
   	extend: {
   		fontFamily: {
-  			sans: [
-  				'var(--font-source-sans-3)'
-  			]
+  			sans: ['Inter', 'var(--font-source-sans-3)', 'system-ui', 'sans-serif'],
   		},
   		colors: {
   			background: 'hsl(var(--background))',
@@ -48,6 +46,11 @@ module.exports = {
   				DEFAULT: 'hsl(var(--destructive))',
   				foreground: 'hsl(var(--destructive-foreground))'
   			},
+  			// Apple-specific semantic colors
+  			'apple-blue': 'var(--accent-hex)',
+  			'app-bg': 'var(--app-bg)',
+  			'panel': 'var(--panel-bg)',
+  			'panel-elevated': 'var(--panel-elevated)',
   			chart: {
   				'1': 'hsl(var(--chart-1))',
   				'2': 'hsl(var(--chart-2))',
@@ -57,9 +60,10 @@ module.exports = {
   			}
   		},
   		borderRadius: {
-  			lg: 'var(--radius)',
-  			md: 'calc(var(--radius) - 2px)',
-  			sm: 'calc(var(--radius) - 4px)'
+  			lg: 'var(--radius)',           // 12px
+  			md: 'calc(var(--radius) - 4px)', // 8px
+  			sm: 'calc(var(--radius) - 8px)', // 4px
+  			xl: 'calc(var(--radius) + 4px)', // 16px
   		},
   		keyframes: {
   			'accordion-down': {

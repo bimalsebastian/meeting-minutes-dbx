@@ -1434,14 +1434,14 @@ export function ModelSettingsModal({
 
                         {/* Show progress for gemma3:1b download */}
                         {isDownloading('gemma3:1b') && getProgress('gemma3:1b') !== undefined && (
-                          <div className="bg-white rounded-md border p-3">
+                          <div className="bg-[var(--panel-bg)] rounded-md border p-3">
                             <div className="flex items-center justify-between mb-2">
                               <span className="text-sm font-medium text-blue-600">Downloading gemma3:1b</span>
                               <span className="text-sm font-semibold text-blue-600">
                                 {Math.round(getProgress('gemma3:1b')!)}%
                               </span>
                             </div>
-                            <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div className="w-full h-2 bg-[var(--panel-elevated)] rounded-full overflow-hidden">
                               <div
                                 className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-300"
                                 style={{ width: `${getProgress('gemma3:1b')}%` }}
@@ -1492,12 +1492,12 @@ export function ModelSettingsModal({
 
                           {/* Progress bar for downloading models */}
                           {modelIsDownloading && progress !== undefined && (
-                            <div className="mt-3 pt-3 border-t border-gray-200">
+                            <div className="mt-3 pt-3 border-t border-[var(--separator)]">
                               <div className="flex items-center justify-between mb-2">
                                 <span className="text-sm font-medium text-blue-600">Downloading...</span>
                                 <span className="text-sm font-semibold text-blue-600">{Math.round(progress)}%</span>
                               </div>
-                              <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                              <div className="w-full h-2 bg-[var(--panel-elevated)] rounded-full overflow-hidden">
                                 <div
                                   className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-300"
                                   style={{ width: `${progress}%` }}
@@ -1529,7 +1529,7 @@ export function ModelSettingsModal({
       </div>
 
       {/* Auto-generate summaries toggle */}
-      {/* <div className="mt-6 pt-6 border-t border-gray-200">
+      {/* <div className="mt-6 pt-6 border-t border-[var(--separator)]">
         <div className="flex items-center justify-between">
           <div className="flex-1">
             <Label htmlFor="auto-generate" className="text-base font-medium">
@@ -1549,10 +1549,10 @@ export function ModelSettingsModal({
 
       {/* Obsidian Sync */}
       <div className="mt-6 border-t pt-4">
-        <h3 className="text-sm font-medium text-gray-700 mb-1">
+        <h3 className="text-sm font-medium text-[var(--text-primary)] mb-1">
           Obsidian Vault Sync
         </h3>
-        <p className="text-xs text-gray-500 mb-3">
+        <p className="text-xs text-[var(--text-secondary)] mb-3">
           Meeting summaries are saved as Markdown files with wikilinks. Syncs automatically when you save a meeting.
         </p>
 
@@ -1600,14 +1600,14 @@ export function ModelSettingsModal({
             )}
 
             {backfillState === 'running' && backfillProgress && (
-              <div className="text-sm text-gray-600 space-y-1">
+              <div className="text-sm text-[var(--text-secondary)] space-y-1">
                 <div className="flex justify-between">
                   <span>Syncing...</span>
                   <span>
                     {backfillProgress.completed + backfillProgress.skipped + backfillProgress.failed} / {backfillProgress.total}
                   </span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-1.5">
+                <div className="w-full bg-[var(--panel-elevated)] rounded-full h-1.5">
                   <div
                     className="bg-blue-600 h-1.5 rounded-full transition-all"
                     style={{
@@ -1619,7 +1619,7 @@ export function ModelSettingsModal({
                     }}
                   />
                 </div>
-                <p className="text-xs text-gray-400 truncate">
+                <p className="text-xs text-[var(--text-secondary)] truncate">
                   {backfillProgress.currentTitle}
                 </p>
               </div>
@@ -1628,7 +1628,7 @@ export function ModelSettingsModal({
             {backfillState === 'done' && backfillProgress && (
               <div className="text-sm space-y-1">
                 <p className="text-green-600 font-medium">✓ Sync complete</p>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-[var(--text-secondary)]">
                   {backfillProgress.completed} synced · {backfillProgress.skipped} already existed ·{' '}
                   {backfillProgress.failed > 0 ? `${backfillProgress.failed} failed` : '0 failed'}
                 </p>

@@ -393,9 +393,9 @@ export function ModelManager({
     return (
       <div className={`space-y-3 ${className}`}>
         <div className="animate-pulse space-y-3">
-          <div className="h-20 bg-gray-100 rounded-lg"></div>
-          <div className="h-20 bg-gray-100 rounded-lg"></div>
-          <div className="h-20 bg-gray-100 rounded-lg"></div>
+          <div className="h-20 bg-[var(--panel-elevated)] rounded-lg"></div>
+          <div className="h-20 bg-[var(--panel-elevated)] rounded-lg"></div>
+          <div className="h-20 bg-[var(--panel-elevated)] rounded-lg"></div>
         </div>
       </div>
     );
@@ -480,7 +480,7 @@ export function ModelManager({
         <motion.div
           initial={{ opacity: 0, y: -5 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-xs text-gray-500 text-center pt-2"
+          className="text-xs text-[var(--text-secondary)] text-center pt-2"
         >
           Using {getDisplayName(selectedModel)} for transcription
         </motion.div>
@@ -536,8 +536,8 @@ function ModelCard({
         ${isSelected && isAvailable
           ? 'border-blue-500 bg-blue-50'
           : isAvailable
-            ? 'border-gray-200 hover:border-gray-300 bg-white'
-            : 'border-gray-200 bg-gray-50'
+            ? 'border-[var(--separator)] hover:border-gray-300 bg-[var(--panel-bg)]'
+            : 'border-[var(--separator)] bg-[var(--panel-elevated)]'
         }
         ${isAvailable ? '' : 'cursor-default'}
       `}
@@ -558,9 +558,9 @@ function ModelCard({
             {/* Model Name and Tagline */}
             <div className="flex items-center gap-2 flex-wrap mb-2">
               <span className="text-2xl">{getModelIcon(model.accuracy)}</span>
-              <h3 className="font-semibold text-gray-900">{displayName}</h3>
-              <span className="text-sm text-gray-500">•</span>
-              <span className="text-sm text-gray-500">{getModelTagline(model.name, model.speed, model.accuracy)}</span>
+              <h3 className="font-semibold text-[var(--text-primary)]">{displayName}</h3>
+              <span className="text-sm text-[var(--text-secondary)]">•</span>
+              <span className="text-sm text-[var(--text-secondary)]">{getModelTagline(model.name, model.speed, model.accuracy)}</span>
               {isSelected && isAvailable && (
                 <motion.span
                   initial={{ scale: 0 }}
@@ -575,7 +575,7 @@ function ModelCard({
                   ? 'bg-green-100 text-green-700'
                   : getModelPerformanceBadge(model.name).color === 'orange'
                     ? 'bg-orange-100 text-orange-700'
-                    : 'bg-gray-100 text-gray-700'
+                    : 'bg-[var(--panel-elevated)] text-[var(--text-primary)]'
                   }`}>
                   {getModelPerformanceBadge(model.name).label}
                 </span>
@@ -583,7 +583,7 @@ function ModelCard({
             </div>
 
             {/* Model Specs */}
-            <div className="flex items-center space-x-4 text-sm text-gray-600 ml-9 mt-1.5">
+            <div className="flex items-center space-x-4 text-sm text-[var(--text-secondary)] ml-9 mt-1.5">
               <span className="flex items-center space-x-1">
                 <span>📦</span>
                 <span>{formatFileSize(model.size_mb)}</span>
@@ -618,7 +618,7 @@ function ModelCard({
                         e.stopPropagation();
                         onDelete();
                       }}
-                      className="text-gray-400 hover:text-red-600 transition-colors p-1"
+                      className="text-[var(--text-secondary)] hover:text-red-600 transition-colors p-1"
                       title="Delete model to free up space"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -685,7 +685,7 @@ function ModelCard({
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="mt-3 pt-3 border-t border-gray-200"
+            className="mt-3 pt-3 border-t border-[var(--separator)]"
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
@@ -697,13 +697,13 @@ function ModelCard({
                   e.stopPropagation();
                   onCancel();
                 }}
-                className="text-xs text-gray-600 hover:text-red-600 font-medium transition-colors px-2 py-1 rounded hover:bg-red-50"
+                className="text-xs text-[var(--text-secondary)] hover:text-red-600 font-medium transition-colors px-2 py-1 rounded hover:bg-red-50"
                 title="Cancel download"
               >
                 Cancel
               </button>
             </div>
-            <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-[var(--panel-elevated)] rounded-full overflow-hidden">
               <motion.div
                 className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full"
                 initial={{ width: 0 }}
@@ -711,7 +711,7 @@ function ModelCard({
                 transition={{ duration: 0.3, ease: 'easeOut' }}
               />
             </div>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-[var(--text-secondary)] mt-1">
               {model.size_mb ? (
                 <>
                   {formatFileSize(model.size_mb * downloadProgress / 100)} / {formatFileSize(model.size_mb)}

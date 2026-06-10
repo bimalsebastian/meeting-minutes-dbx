@@ -55,6 +55,7 @@
                         "fs:allow-app-write",
                         "fs:allow-download-write",
                         "fs:allow-download-read",
+                        "fs:allow-read-dir",
                         "fs:scope-download",
                         "core:path:default",
                         "core:event:default",
@@ -77,6 +78,9 @@
                             "allow": [
                                 {
                                     "path": "$APPDATA/*"
+                                },
+                                {
+                                    "path": "$VIDEO/**"
                                 }
                             ]
                         }

@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import { RecordingControls } from '@/components/RecordingControls';
@@ -23,13 +24,52 @@ import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { useCalendarPolling } from '@/hooks/useCalendarPolling';
+import { useGenieLiveCycles } from '@/hooks/useGenieLiveCycles';
+import { useAttachments } from '@/contexts/AttachmentsContext';
 
 // Load new feature panels dynamically — isolates any module-level error to
 // that panel's chunk and prevents it from breaking the main page bundle.
 const AttachmentsPanel = dynamic(() => import('./_components/AttachmentsPanel').then(m => m.AttachmentsPanel), { ssr: false });
-const CopilotSidebar   = dynamic(() => import('./_components/CopilotSidebar'), { ssr: false });
+const CopilotSidebar   = dynamic(() => import('./_components/GenieLiveSidebar'), { ssr: false });
 const CalendarSplitBanner = dynamic(() => import('@/components/CalendarSplitBanner'), { ssr: false });
 const RecallBanner     = dynamic(() => import('@/components/RecallBanner').then(m => ({ default: m.RecallBanner })), { ssr: false });
+
+// Drag-to-resize handle between two panels.
+// dragging left (negative delta) makes the right panel wider.
+function ResizeHandle({ onDelta }: { onDelta: (delta: number) => void }) {
+  const dragging = useRef(false);
+  const lastX = useRef(0);
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    dragging.current = true;
+    lastX.current = e.clientX;
+    e.preventDefault();
+  }, []);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!dragging.current) return;
+      const delta = e.clientX - lastX.current;
+      lastX.current = e.clientX;
+      onDelta(delta);
+    };
+    const onUp = () => { dragging.current = false; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [onDelta]);
+
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      className="w-1 flex-shrink-0 bg-[var(--separator)] hover:bg-[var(--accent-hex)] cursor-col-resize transition-colors z-10"
+      title="Drag to resize"
+    />
+  );
+}
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -37,6 +77,18 @@ export default function Home() {
   const [barHeights, setBarHeights] = useState(['58%', '76%', '58%']);
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
   const [copilotEnabled, setCopilotEnabled] = useState(false);
+  const [copilotIntervalMinutes, setCopilotIntervalMinutes] = useState(5);
+  const [geniePaused, setGeniePaused] = useState(false);
+
+  // Resizable panel widths (px)
+  const [attachWidth, setAttachWidth] = useState(200);
+  const [genieWidth, setGenieWidth] = useState(420);
+  const onAttachDelta = useCallback((delta: number) => {
+    setAttachWidth(w => Math.max(160, Math.min(480, w - delta)));
+  }, []);
+  const onGenieDelta = useCallback((delta: number) => {
+    setGenieWidth(w => Math.max(200, Math.min(560, w - delta)));
+  }, []);
 
   // Use contexts for state management
   const { meetingTitle, currentMeetingId, setMeetingTitle, clearTranscripts } = useTranscripts();
@@ -59,8 +111,35 @@ export default function Home() {
     setIsRecordingDisabled
   );
 
+  // Attachments context — survives navigation
+  const { loadForMeeting, clearAttachments } = useAttachments();
+
+  // Load screenshots with Rust UUID when recording starts; clear on stop
+  useEffect(() => {
+    if (recordingState.isRecording) {
+      invoke<string | null>('get_current_meeting_id')
+        .then(id => { if (id) loadForMeeting(id); })
+        .catch(() => {});
+    } else {
+      clearAttachments();
+      setGeniePaused(false);  // always reset Genie pause when recording ends
+    }
+  }, [recordingState.isRecording, loadForMeeting, clearAttachments]);
+
   // Calendar polling for auto-split feature
   const calendarState = useCalendarPolling();
+
+  // Read transcripts from memory and send to Genie Live backend on each cycle.
+  // TranscriptContext is cleared on every new recording, so all transcripts in
+  // it belong to the current session — no time-based filtering needed.
+  const { transcriptsRef, notesRef } = useTranscripts();
+  useGenieLiveCycles(
+    recordingState.isRecording,
+    recordingState.isPaused || geniePaused,   // audio pause OR user-toggled Genie pause
+    () => transcriptsRef.current.map(t => t.text).join(' ').trim(),
+    copilotIntervalMinutes,
+    () => notesRef.current.map(n => n.text),
+  );
 
   // Recovery hook
   const {
@@ -125,7 +204,10 @@ export default function Home() {
   useEffect(() => {
     fetch('http://localhost:5167/api/copilot/settings')
       .then(r => r.json())
-      .then(d => setCopilotEnabled(!!d.copilotEnabled))
+      .then(d => {
+        setCopilotEnabled(!!d.copilotEnabled);
+        setCopilotIntervalMinutes(d.copilotIntervalMinutes ?? 5);
+      })
       .catch(() => {});
   }, []);
 
@@ -256,7 +338,7 @@ export default function Home() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col h-screen bg-gray-50"
+      className="flex flex-col h-screen bg-[var(--app-bg)]"
     >
       <RecallBanner />
       {/* All Modals supported*/}
@@ -275,8 +357,40 @@ export default function Home() {
         onDelete={deleteRecoverableMeeting}
         onLoadPreview={loadMeetingTranscripts}
       />
-      <div className="flex flex-1 overflow-hidden" style={{ flexDirection: 'column' }}>
-        {/* Calendar auto-split banner — shown when a meeting ends during recording */}
+      <div className="flex flex-col flex-1 overflow-hidden">
+
+        {/* ── Header bar: recording controls ── */}
+        {(hasMicrophone || isRecording) &&
+          status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
+          status !== RecordingStatus.SAVING && (
+            <div
+              className="flex-shrink-0 flex items-center px-4 gap-3"
+              style={{ height: 54, borderBottom: '1px solid var(--separator)', background: 'var(--panel-bg)' }}
+            >
+              {/* Meeting title */}
+              <p className="flex-1 min-w-0 text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
+                {meetingTitle || 'Recording'}
+              </p>
+              {/* Controls pill */}
+              <div className="pill-glass rounded-full shadow-sm flex-shrink-0">
+                <RecordingControls
+                  isRecording={recordingState.isRecording}
+                  onRecordingStop={(callApi = true) => handleRecordingStop(callApi)}
+                  onRecordingStart={handleRecordingStart}
+                  onTranscriptReceived={() => {}}
+                  onStopInitiated={() => setIsStopping(true)}
+                  barHeights={barHeights}
+                  onTranscriptionError={(message) => showModal('errorAlert', message)}
+                  isRecordingDisabled={isRecordingDisabled}
+                  isParentProcessing={isProcessingStop}
+                  selectedDevices={selectedDevices}
+                  meetingName={meetingTitle}
+                />
+              </div>
+            </div>
+          )}
+
+        {/* Calendar auto-split banner */}
         {recordingState.isRecording && (
           <CalendarSplitBanner
             state={calendarState}
@@ -284,60 +398,42 @@ export default function Home() {
             onKeepRecording={handleKeepRecording}
           />
         )}
-        <div className="flex flex-1 overflow-hidden">
-        <TranscriptPanel
-          isProcessingStop={isProcessingStop}
-          isStopping={isStopping}
-          showModal={showModal}
-        />
-        <AttachmentsPanel
-          meetingId={currentMeetingId}
-          isRecording={recordingState.isRecording}
-        />
 
-        {/* Live SA Co-pilot Sidebar */}
-        <CopilotSidebar
-          meetingId={currentMeetingId}
-          isRecording={recordingState.isRecording}
-          isEnabled={copilotEnabled}
-        />
+        {/* ── Top zone: Genie Live (full width, dominant) ── */}
+        <div className="flex-1 overflow-hidden min-h-0">
+          <CopilotSidebar
+            meetingId={currentMeetingId}
+            isRecording={recordingState.isRecording}
+            isEnabled={copilotEnabled}
+            geniePaused={geniePaused}
+            onToggleGeniePause={() => setGeniePaused(p => !p)}
+          />
+        </div>
 
-        </div>{/* end inner flex */}
-        {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
-        {(hasMicrophone || isRecording) &&
-          status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
-          status !== RecordingStatus.SAVING && (
-            <div className="fixed bottom-12 left-0 right-0 z-10">
-              <div
-                className="flex justify-center pl-8 transition-[margin] duration-300"
-                style={{
-                  marginLeft: sidebarCollapsed ? '4rem' : '16rem'
-                }}
-              >
-                <div className="w-2/3 max-w-[750px] flex justify-center">
-                  <div className="bg-white rounded-full shadow-lg flex items-center">
-                    <RecordingControls
-                      isRecording={recordingState.isRecording}
-                      onRecordingStop={(callApi = true) => handleRecordingStop(callApi)}
-                      onRecordingStart={handleRecordingStart}
-                      onTranscriptReceived={() => { }} // Not actually used by RecordingControls
-                      onStopInitiated={() => setIsStopping(true)}
-                      barHeights={barHeights}
-                      onTranscriptionError={(message) => {
-                        showModal('errorAlert', message);
-                      }}
-                      isRecordingDisabled={isRecordingDisabled}
-                      isParentProcessing={isProcessingStop}
-                      selectedDevices={selectedDevices}
-                      meetingName={meetingTitle}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+        {/* ── Bottom strip: Transcript (left, dim) + Screenshots (right) ── */}
+        <div
+          className="flex flex-shrink-0 overflow-hidden"
+          style={{ height: 240, borderTop: '1px solid var(--separator)' }}
+        >
+          {/* Transcript — low opacity, auto-scrolling */}
+          <div className="flex-1 overflow-hidden min-w-0" style={{ opacity: 0.55, borderRight: '1px solid var(--separator)' }}>
+            <TranscriptPanel
+              isProcessingStop={isProcessingStop}
+              isStopping={isStopping}
+              showModal={showModal}
+              stripMode
+            />
+          </div>
 
-        {/* Status Overlays - Processing and Saving */}
+          {/* Screenshots */}
+          <AttachmentsPanel
+            meetingId={currentMeetingId}
+            isRecording={recordingState.isRecording}
+            width={220}
+          />
+        </div>
+
+        {/* Status Overlays */}
         <StatusOverlays
           isProcessing={status === RecordingStatus.PROCESSING_TRANSCRIPTS && !recordingState.isRecording}
           isSaving={status === RecordingStatus.SAVING}

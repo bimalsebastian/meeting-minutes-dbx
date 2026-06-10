@@ -42,16 +42,8 @@ export class Analytics {
   }
 
   private static async doInit(): Promise<void> {
-    try {
-      await invoke('init_analytics');
-      this.initialized = true;
-      console.log('Analytics initialized successfully');
-    } catch (error) {
-      console.error('Failed to initialize analytics:', error);
-      throw error;
-    } finally {
-      this.initializationPromise = null;
-    }
+    // PostHog disabled — using custom Google Drive / HTTP telemetry instead.
+    this.initializationPromise = null;
   }
 
   static async disable(): Promise<void> {

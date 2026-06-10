@@ -195,6 +195,25 @@ export function useSummaryGeneration({
           console.log('[Summary] Calling backend databricks_generate_summary (no frontend fetch)...');
           setSummaryStatus('summarizing');
 
+          // Fetch KB context silently — failure is non-fatal
+          let knowledgeContext: string | undefined;
+          try {
+            const kbRes = await fetch('http://localhost:5167/api/knowledge-store/context', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ transcript: transcriptText.slice(0, 4000) }),
+            });
+            if (kbRes.ok) {
+              const kbData = await kbRes.json();
+              knowledgeContext = kbData.context || undefined;
+              if (knowledgeContext) {
+                console.log('[Summary] KB context injected, files:', kbData.files_used);
+              }
+            }
+          } catch {
+            console.log('[Summary] KB context unavailable (non-fatal)');
+          }
+
           let markdown: string;
           try {
             markdown = await invokeTauri<string>('databricks_generate_summary', {
@@ -203,6 +222,7 @@ export function useSummaryGeneration({
                 endpointName: endpoint,
                 token: token.trim(),
                 transcript: transcriptText,
+                knowledgeContext: knowledgeContext ?? null,
               },
             });
             console.log('[Summary] Summary generated successfully, length:', markdown?.length ?? 0);

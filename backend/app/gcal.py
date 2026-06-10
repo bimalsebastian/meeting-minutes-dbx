@@ -160,6 +160,12 @@ async def calendar_callback(code: str, state: str):
     await _db.save_calendar_token(flow.credentials.to_json())
     _polling_state["connected"] = True
     logger.info("[gcal.py:calendar_callback()] - OAuth callback handled, token saved")
+    try:
+        from main import _telemetry
+        import asyncio
+        asyncio.create_task(_telemetry.capture("calendar_connected"))
+    except Exception:
+        pass
 
     return HTMLResponse(
         '<html><body><h2>Authentication successful!</h2>'
@@ -216,8 +222,13 @@ async def calendar_acknowledge_split():
     _polling_state["next_event_id"] = None
     _polling_state["grace_period_started_at"] = None
     _polling_state["auto_split_triggered"] = False
-    # last_triggered_event_id stays set to prevent re-trigger
     logger.info("[gcal.py:calendar_acknowledge_split()] - Split acknowledged, state cleared")
+    try:
+        from main import _telemetry
+        import asyncio
+        asyncio.create_task(_telemetry.capture("meeting_split_triggered", {"trigger": "calendar"}))
+    except Exception:
+        pass
     return {"ok": True}
 
 

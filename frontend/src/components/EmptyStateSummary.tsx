@@ -25,10 +25,10 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
       className="flex flex-col items-center justify-center h-full p-8 text-center"
     >
       <FileQuestion className="w-16 h-16 text-gray-300 mb-4" />
-      <h3 className="text-lg font-semibold text-gray-900 mb-2">
+      <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">
         No Summary Generated Yet
       </h3>
-      <p className="text-sm text-gray-500 mb-6 max-w-md">
+      <p className="text-sm text-[var(--text-secondary)] mb-6 max-w-md">
         Generate an AI-powered summary of your meeting transcript to get key points, action items, and decisions.
       </p>
 

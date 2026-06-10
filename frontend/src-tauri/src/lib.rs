@@ -36,6 +36,7 @@ pub mod api;
 pub mod auth;
 pub mod audio;
 pub mod console_utils;
+pub mod python_backend;
 pub mod database;
 pub mod notifications;
 pub mod obsidian_sync;
@@ -408,6 +409,11 @@ async fn stop_clipboard_monitor() -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn list_meeting_attachments(meeting_id: String) -> Result<Vec<String>, String> {
+    Ok(crate::clipboard_monitor::list_meeting_pngs(&meeting_id))
+}
+
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
@@ -455,6 +461,12 @@ pub fn run() {
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
             log::info!("Application setup complete");
+
+            // Start Python backend (co-pilot, calendar, attachments)
+            crate::python_backend::start_backend();
+            tauri::async_runtime::spawn(async {
+                crate::python_backend::wait_until_ready().await;
+            });
 
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
@@ -685,6 +697,8 @@ pub fn run() {
             auth::azure_cli::do_azure_login,
             auth::azure_cli::get_databricks_token,
             auth::azure_cli::refresh_databricks_token,
+            auth::databricks_cli::list_databricks_profiles,
+            auth::databricks_cli::get_databricks_cli_token,
             auth::databricks_summary::databricks_generate_summary,
             // Obsidian vault sync
             obsidian_sync::write_obsidian_note,
@@ -777,12 +791,14 @@ pub fn run() {
             meeting_detector::get_active_window_title,
             start_clipboard_monitor,
             stop_clipboard_monitor,
+            list_meeting_attachments,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
             if let tauri::RunEvent::Exit = event {
                 log::info!("Application exiting, cleaning up resources...");
+                crate::python_backend::stop_backend();
                 tauri::async_runtime::block_on(async {
                     // Clean up database connection and checkpoint WAL
                     if let Some(app_state) = _app_handle.try_state::<state::AppState>() {

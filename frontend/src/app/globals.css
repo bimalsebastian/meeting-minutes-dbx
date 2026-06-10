@@ -2,6 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(-10px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes liveDot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+@keyframes barsPulse {
+  0%, 100% { transform: scaleY(var(--bar-v, 0.5)); }
+  50%       { transform: scaleY(calc(var(--bar-v, 0.5) * 0.4 + 0.2)); }
+}
+
 @keyframes vibrate {
   0% {
     transform: translate(0);
@@ -78,58 +91,125 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
+    /* Apple Light — Meetily MacOS */
+    --background: 240 5% 97%;        /* #F5F5F7 */
+    --foreground: 240 4% 12%;        /* #1D1D1F */
+    --card: 0 0% 100%;               /* #FFFFFF */
+    --card-foreground: 240 4% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
+    --popover-foreground: 240 4% 12%;
+    --primary: 211 100% 50%;         /* #007AFF */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 3% 44%;         /* #6E6E73 */
+    --secondary-foreground: 0 0% 100%;
+    --muted: 240 5% 95%;
+    --muted-foreground: 240 3% 44%;
+    --accent: 211 100% 50%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --radius: 0.5rem;
+    --border: 0 0% 0% / 0.08;        /* rgba(0,0,0,0.08) */
+    --input: 240 5% 92%;
+    --ring: 211 100% 50%;
+    --radius: 0.75rem;               /* 12px */
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
+    /* Apple-specific custom props */
+    --app-bg: #F5F5F7;
+    --panel-bg: #FFFFFF;
+    --panel-elevated: #FFFFFF;
+    --sidebar-glass: rgba(255, 255, 255, 0.72);
+    --accent-hex: #007AFF;
+    --text-primary: #1D1D1F;
+    --text-secondary: #6E6E73;
+    --separator: rgba(0, 0, 0, 0.08);
+    --pill-glass: rgba(255, 255, 255, 0.82);
+    --hint-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 4px 12px rgba(0,0,0,0.03);
+    --hint-border: #007AFF;
+    --note-bg: rgba(255, 251, 235, 0.9);
+    --note-border: #F59E0B;
+    --coral: #E54535;
+    --coral-bright: #FF3B1F;
+    --coral-dim: rgba(229,69,53,0.10);
+    --coral-tint: rgba(229,69,53,0.10);
+    --coral-tint-2: rgba(229,69,53,0.06);
+    --green: #30D158;
+    --text-tertiary: #AEAEB2;
+    --separator-strong: rgba(0,0,0,0.15);
+    /* Databricks brand */
+    --db-navy: #1B3139;
+    --db-lava: #FF3621;
+    --db-lava-tint: rgba(255,54,33,0.10);
+    --db-oat: #F9F7F4;
+    --db-oat-medium: #EEEDE9;
+    --db-line: #E4E2DD;
+    --db-ink: #3A3838;
+    --db-ink-soft: #5A5755;
+    --db-ink-muted: #8A8580;
   }
 
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
+    /* Apple Dark — Sequoia Midnight */
+    --background: 0 0% 0%;           /* #000000 */
+    --foreground: 0 0% 100%;         /* #FFFFFF */
+    --card: 240 1% 11%;              /* #1C1C1E */
+    --card-foreground: 0 0% 100%;
+    --popover: 240 1% 11%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 211 100% 52%;         /* #0A84FF */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 1% 18%;         /* #2C2C2E */
+    --secondary-foreground: 0 0% 100%;
+    --muted: 240 1% 18%;
+    --muted-foreground: 0 0% 60%;    /* rgba(235,235,245,0.6) approx */
+    --accent: 211 100% 52%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;        /* #FF453A */
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
+    --border: 0 0% 100% / 0.1;
+    --input: 240 1% 18%;
+    --ring: 211 100% 52%;
+    --radius: 0.75rem;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
+    /* Apple-specific custom props */
+    --app-bg: #000000;
+    --panel-bg: #1C1C1E;
+    --panel-elevated: #2C2C2E;
+    --sidebar-glass: rgba(28, 28, 30, 0.82);
+    --accent-hex: #0A84FF;
+    --text-primary: #FFFFFF;
+    --text-secondary: rgba(235, 235, 245, 0.6);
+    --separator: rgba(84, 84, 88, 0.3);
+    --pill-glass: rgba(44, 44, 46, 0.92);
+    --hint-shadow: none;
+    --hint-border: #0A84FF;
+    --note-bg: rgba(58, 46, 28, 0.8);
+    --note-border: #D97706;
+    --coral: #FF5F46;
+    --coral-bright: #FF7A60;
+    --coral-dim: rgba(255,95,70,0.15);
+    --coral-tint: rgba(255,95,70,0.12);
+    --coral-tint-2: rgba(255,95,70,0.06);
+    --green: #30D158;
+    --text-tertiary: #636366;
+    --separator-strong: rgba(84,84,88,0.5);
+    /* Databricks brand (dark mode maps to same values — lava on dark) */
+    --db-navy: #E8EFF2;
+    --db-lava: #FF5F46;
+    --db-lava-tint: rgba(255,95,70,0.12);
+    --db-oat: #1C1C1E;
+    --db-oat-medium: #2C2C2E;
+    --db-line: rgba(84,84,88,0.3);
+    --db-ink: #FFFFFF;
+    --db-ink-soft: rgba(235,235,245,0.8);
+    --db-ink-muted: #8E8E93;
   }
 }
 
@@ -179,6 +259,66 @@
     scrollbar-width: thin;
     scrollbar-color: #d1d5db transparent;
   }
+
+  /* Apple glass sidebar */
+  .sidebar-glass {
+    background: var(--sidebar-glass);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  /* Apple recording pill */
+  .pill-glass {
+    background: var(--pill-glass);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  /* Apple hint card */
+  .hint-card {
+    background: var(--panel-bg);
+    box-shadow: var(--hint-shadow);
+    border-radius: 12px;
+    border-top: 2px solid var(--hint-border);
+  }
+
+  /* Apple panel surface */
+  .apple-panel {
+    background: var(--panel-bg);
+  }
+
+  /* Dark scrollbar */
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(84, 84, 88, 0.5);
+  }
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(84, 84, 88, 0.8);
+  }
+
+  /* Genie card markdown — compact prose */
+  .genie-md p { margin: 0 0 6px; line-height: 1.45; }
+  .genie-md p:last-child { margin-bottom: 0; }
+  .genie-md h1, .genie-md h2, .genie-md h3 {
+    font-size: 0.8rem; font-weight: 700;
+    margin: 8px 0 4px; color: var(--coral);
+    letter-spacing: 0.02em; text-transform: uppercase;
+  }
+  .genie-md h1:first-child, .genie-md h2:first-child, .genie-md h3:first-child { margin-top: 0; }
+  .genie-md strong { font-weight: 600; color: var(--text-primary); }
+  .genie-md em { font-style: italic; }
+  .genie-md ul, .genie-md ol { padding-left: 1rem; margin: 4px 0; }
+  .genie-md li { margin-bottom: 3px; line-height: 1.4; }
+  .genie-md code {
+    font-size: 0.75rem; padding: 1px 4px; border-radius: 4px;
+    background: rgba(120,120,128,0.16); font-family: ui-monospace, monospace;
+  }
+  .genie-md hr { border: none; border-top: 1px solid var(--separator); margin: 8px 0; }
+  .genie-md table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12.5px; border-radius: 8px; overflow: hidden; border: 1px solid var(--separator); }
+  .genie-md th { background: var(--db-navy); color: #fff; text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; }
+  .genie-md td { padding: 8px 12px; border-top: 1px solid var(--separator); vertical-align: top; line-height: 1.45; }
+  .genie-md tr:nth-child(even) td { background: var(--db-oat); }
+  .genie-md blockquote { border-left: 3px solid var(--db-lava); margin: 6px 0; padding: 6px 12px; background: var(--db-lava-tint); border-radius: 0 6px 6px 0; }
+  .genie-md blockquote p { margin: 0; }
 
   /* BlockNote Editor - Override fixed dimensions for responsive layout */
   .bn-container {

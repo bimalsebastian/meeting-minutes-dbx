@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ExternalLink, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 
 export default function CalendarSettings() {
   const [clientId, setClientId] = useState('');
@@ -76,7 +77,7 @@ export default function CalendarSettings() {
         return;
       }
       const { auth_url } = await res.json();
-      window.open(auth_url, '_blank', 'width=500,height=700');
+      await invoke('open_external_url', { url: auth_url });
 
       // Poll status every 3s for up to 60s to detect successful auth
       const poll = setInterval(async () => {
@@ -120,13 +121,13 @@ export default function CalendarSettings() {
       {/* Header */}
       <div>
         <h3 className="text-sm font-semibold mb-1">Google Calendar Integration</h3>
-        <p className="text-xs text-gray-500 mb-4">
+        <p className="text-xs text-[var(--text-secondary)] mb-4">
           Auto-split recordings when calendar events end and name meetings from event titles.
         </p>
       </div>
 
       {/* Credential helper */}
-      <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700 space-y-1">
+      <div className="p-3 rounded-lg text-xs space-y-1" style={{ background: 'rgba(0,122,255,0.08)', border: '1px solid rgba(0,122,255,0.15)', color: 'var(--accent-hex)' }}>
         <p>
           You&apos;ll need your own Google OAuth 2.0 credentials.{' '}
           <a
@@ -140,7 +141,7 @@ export default function CalendarSettings() {
         </p>
         <p>
           Set the OAuth redirect URI to:{' '}
-          <code className="bg-blue-100 px-1 rounded">http://localhost:5167/api/calendar/callback</code>
+          <code className="px-1 rounded" style={{ background: 'rgba(0,122,255,0.12)' }}>http://localhost:5167/api/calendar/callback</code>
         </p>
         <p>Enable the <strong>Google Calendar API</strong> in your Google Cloud project.</p>
       </div>
@@ -148,10 +149,10 @@ export default function CalendarSettings() {
       {/* Credentials form */}
       <div className="space-y-3">
         <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">
+          <label className="block text-xs font-medium text-[var(--text-primary)] mb-1">
             Client ID
             {hasCredentials && clientIdPreview && (
-              <span className="ml-2 text-gray-400 font-normal">
+              <span className="ml-2 text-[var(--text-secondary)] font-normal">
                 (current: <code>{clientIdPreview}</code>)
               </span>
             )}
@@ -161,17 +162,19 @@ export default function CalendarSettings() {
             value={clientId}
             onChange={e => setClientId(e.target.value)}
             placeholder="xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com"
-            className="w-full px-3 py-2 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full px-3 py-2 text-xs rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--accent-hex)]"
+            style={{ border: '1px solid var(--separator)', background: 'var(--panel-elevated)', color: 'var(--text-primary)' }}
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Client Secret</label>
+          <label className="block text-xs font-medium text-[var(--text-primary)] mb-1">Client Secret</label>
           <input
             type="password"
             value={clientSecret}
             onChange={e => setClientSecret(e.target.value)}
             placeholder="GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-            className="w-full px-3 py-2 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full px-3 py-2 text-xs rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--accent-hex)]"
+            style={{ border: '1px solid var(--separator)', background: 'var(--panel-elevated)', color: 'var(--text-primary)' }}
           />
         </div>
         <button
@@ -185,7 +188,7 @@ export default function CalendarSettings() {
       </div>
 
       {/* Connection status */}
-      <div className="border-t border-gray-100 pt-4">
+      <div className="border-t border-[var(--separator)] pt-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             {connected ? (

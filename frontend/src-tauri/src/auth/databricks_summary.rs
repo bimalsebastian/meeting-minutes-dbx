@@ -4,7 +4,7 @@
 use serde::Deserialize;
 use serde_json::json;
 
-const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant that summarizes meeting transcripts. Produce a clear, concise summary with key points and action items when relevant.";
+const BASE_SYSTEM_PROMPT: &str = "You are a helpful assistant that summarizes meeting transcripts. Produce a clear, concise summary with key points and action items when relevant.";
 
 #[derive(Debug, Deserialize)]
 pub struct DatabricksGenerateSummaryArgs {
@@ -14,6 +14,10 @@ pub struct DatabricksGenerateSummaryArgs {
     endpoint_name: String,
     token: String,
     transcript: String,
+    /// Optional pre-fetched knowledge base context. When provided it is
+    /// prepended to the system prompt so the LLM can use it while summarising.
+    #[serde(rename = "knowledgeContext", default)]
+    knowledge_context: Option<String>,
 }
 
 #[tauri::command]
@@ -23,13 +27,22 @@ pub async fn databricks_generate_summary(args: DatabricksGenerateSummaryArgs) ->
         endpoint_name,
         token,
         transcript,
+        knowledge_context,
     } = args;
 
+    let system_prompt = match &knowledge_context {
+        Some(ctx) if !ctx.trim().is_empty() => {
+            format!(
+                "Knowledge Base Context (use this background information while summarising):\n\n{}\n\n---\n\n{}",
+                ctx.trim(),
+                BASE_SYSTEM_PROMPT
+            )
+        }
+        _ => BASE_SYSTEM_PROMPT.to_string(),
+    };
+
     println!("[Rust] databricks_generate_summary called");
-    println!("[Rust] Workspace URL: {}", workspace_url);
-    println!("[Rust] Endpoint: {}", endpoint_name);
-    println!("[Rust] Token length: {}", token.len());
-    println!("[Rust] Transcript length: {}", transcript.len());
+    println!("[Rust] KB context injected: {}", knowledge_context.is_some());
 
     let url = format!(
         "{}/serving-endpoints/{}/invocations",
@@ -37,13 +50,11 @@ pub async fn databricks_generate_summary(args: DatabricksGenerateSummaryArgs) ->
         urlencoding::encode(&endpoint_name)
     );
 
-    println!("[Rust] Request URL: {}", url);
-
     let payload = json!({
         "messages": [
             {
                 "role": "system",
-                "content": DEFAULT_SYSTEM_PROMPT
+                "content": system_prompt
             },
             {
                 "role": "user",
@@ -53,11 +64,6 @@ pub async fn databricks_generate_summary(args: DatabricksGenerateSummaryArgs) ->
         "max_tokens": 2000
     });
 
-    println!(
-        "[Rust] Payload: {}",
-        serde_json::to_string_pretty(&payload).unwrap()
-    );
-
     let client = reqwest::Client::new();
     let response = client
         .post(&url)
@@ -66,21 +72,10 @@ pub async fn databricks_generate_summary(args: DatabricksGenerateSummaryArgs) ->
         .json(&payload)
         .send()
         .await
-        .map_err(|e| {
-            eprintln!("[Rust] Request failed: {}", e);
-            format!("Request failed: {}", e)
-        })?;
+        .map_err(|e| format!("Request failed: {}", e))?;
 
     let status = response.status();
-    println!("[Rust] Response status: {}", status);
-
-    let response_text = response.text().await.map_err(|e| {
-        eprintln!("[Rust] Failed to read response: {}", e);
-        format!("Failed to read response: {}", e)
-    })?;
-
-    let preview_len = response_text.len().min(500);
-    println!("[Rust] Response body: {}", &response_text[..preview_len]);
+    let response_text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
 
     if !status.is_success() {
         return Err(format!("API returned {}: {}", status, response_text));
@@ -93,8 +88,6 @@ pub async fn databricks_generate_summary(args: DatabricksGenerateSummaryArgs) ->
         .as_str()
         .ok_or("Missing content in response")?
         .to_string();
-
-    println!("[Rust] Summary extracted, length: {}", summary.len());
 
     Ok(summary)
 }

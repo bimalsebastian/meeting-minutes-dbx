@@ -46,7 +46,7 @@ export function useCalendarPolling(): CalendarPollingState {
     };
 
     poll();
-    const id = setInterval(poll, 10000);
+    const id = setInterval(poll, 60000);
     return () => clearInterval(id);
   }, []);
 

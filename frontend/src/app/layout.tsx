@@ -1,7 +1,8 @@
 'use client'
 
 import './globals.css'
-import { Source_Sans_3 } from 'next/font/google'
+import { Source_Sans_3, Inter } from 'next/font/google'
+import { ThemeProvider } from '@/contexts/ThemeContext'
 import Sidebar from '@/components/Sidebar'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
 import MainContent from '@/components/MainContent'
@@ -21,11 +22,18 @@ import { OnboardingFlow } from '@/components/onboarding'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
 import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcessingProvider'
 import { useOAuthCallbackInit, useCalendarAutoStart } from '@/App'
+import { ConsentDialog } from '@/components/ConsentDialog'
+import { AttachmentsProvider } from '@/contexts/AttachmentsContext'
 
 const sourceSans3 = Source_Sans_3({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
   variable: '--font-source-sans-3',
+})
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
 })
 
 // export { metadata } from './metadata'
@@ -37,6 +45,7 @@ export default function RootLayout({
 }) {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [onboardingCompleted, setOnboardingCompleted] = useState(false)
+  const [consentDone, setConsentDone] = useState(false)
 
   useEffect(() => {
     // Check onboarding status first
@@ -102,7 +111,9 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`${sourceSans3.variable} font-sans antialiased`}>
+      <body className={`${sourceSans3.variable} ${inter.variable} font-sans antialiased`}>
+        <ThemeProvider>
+        <AttachmentsProvider>
         <AnalyticsProvider>
           <RecordingStateProvider>
             <TranscriptProvider>
@@ -114,6 +125,13 @@ export default function RootLayout({
                         <RecordingPostProcessingProvider>
                           {/* Download progress toast provider - listens for background downloads */}
                           <DownloadProgressToastProvider />
+
+                          {/* Telemetry consent — shown once before any telemetry fires */}
+                          <ConsentDialog onDone={() => {
+                            setConsentDone(true);
+                            // Fire app-opened after consent is settled
+                            fetch('http://localhost:5167/api/telemetry/app-opened', { method: 'POST' }).catch(() => {});
+                          }} />
 
                           {/* Show onboarding or main app */}
                           {showOnboarding ? (
@@ -135,6 +153,8 @@ export default function RootLayout({
           </RecordingStateProvider>
         </AnalyticsProvider>
         <Toaster position="bottom-center" richColors closeButton />
+        </AttachmentsProvider>
+        </ThemeProvider>
       </body>
     </html>
   )

@@ -45,7 +45,7 @@ export default function RecallModal({ isOpen, onClose, brief }: RecallModalProps
             Pre-Meeting Brief: {brief.event_title}
           </DialogTitle>
           {attendees.length > 0 && (
-            <p className="text-sm text-gray-500 mt-1">
+            <p className="text-sm text-[var(--text-secondary)] mt-1">
               Attendees: {attendees.join(', ')}
             </p>
           )}
@@ -53,13 +53,13 @@ export default function RecallModal({ isOpen, onClose, brief }: RecallModalProps
 
         <div className="mt-4">
           {noHistory ? (
-            <div className="bg-gray-50 border border-gray-200 rounded-md p-4 text-sm text-gray-500">
+            <div className="bg-[var(--panel-elevated)] border border-[var(--separator)] rounded-md p-4 text-sm text-[var(--text-secondary)]">
               No previous meeting notes found for these attendees.
             </div>
           ) : (
             <ul className="space-y-2">
               {bulletLines.map((line, idx) => (
-                <li key={idx} className="flex items-start gap-2 text-sm text-gray-800">
+                <li key={idx} className="flex items-start gap-2 text-sm text-[var(--text-primary)]">
                   <span className="mt-0.5 text-blue-500 flex-shrink-0">•</span>
                   <span>{line.startsWith('•') ? line.slice(1).trim() : line}</span>
                 </li>

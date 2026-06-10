@@ -25,6 +25,7 @@ export default function RecallBanner() {
   const handleDismiss = () => {
     localStorage.setItem(`recall_dismissed_${brief.event_id}`, 'true');
     setDismissed((prev) => new Set([...prev, brief.event_id]));
+    fetch(`http://localhost:5167/api/recall/brief/${brief.event_id}/dismiss`, { method: 'POST' }).catch(() => {});
   };
 
   // Parse attendees for display

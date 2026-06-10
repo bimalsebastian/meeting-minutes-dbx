@@ -48,22 +48,40 @@ const DEFAULT_TOKEN_EXPIRY_SECONDS = 3600;
 const BACKGROUND_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 
 /**
- * Get a valid Databricks token (stored with expiry or via Azure CLI). Use this when you only need the token (e.g. for backend invoke).
+ * Get a valid Databricks token.
+ *
+ * Auth method priority:
+ * 1. If a Databricks CLI profile is stored (`databricks_cli_profile`), call
+ *    `get_databricks_cli_token(profile)` — works for both PAT and OAuth profiles,
+ *    no Azure CLI dependency.
+ * 2. Otherwise fall back to the existing Azure CLI flow (`az account get-access-token`).
+ *
+ * For PAT profiles the token never expires so it is returned as-is (no Stronghold needed).
+ * For OAuth CLI profiles the Databricks CLI handles its own refresh silently.
  */
 export async function getValidDatabricksToken(): Promise<string> {
   try {
+    // ── Path 1: Databricks CLI profile ──────────────────────────────────────
+    const cliProfile = await secureRetrieve('databricks_cli_profile');
+    if (cliProfile?.trim()) {
+      try {
+        const token = await invoke<string>('get_databricks_cli_token', {
+          profile: cliProfile.trim(),
+        });
+        if (token?.trim()) return token.trim();
+      } catch (cliErr) {
+        // CLI token failed — fall through to Azure CLI path
+        console.warn('[Databricks] CLI profile token failed, trying Azure CLI:', cliErr);
+      }
+    }
+
+    // ── Path 2: Azure CLI (existing flow) ────────────────────────────────────
     const stored = await secureRetrieve(STORAGE_KEY_TOKEN);
     if (stored?.trim()) {
       const tokenExpiry = await getTokenExpiry(STORAGE_KEY_TOKEN);
       const now = Date.now() / 1000;
-      // Use stored token if: we have a known expiry and it's still valid, OR we have no expiry (legacy token – use it and rely on 401 retry if expired)
-      if (tokenExpiry > now + EXPIRY_BUFFER_SECONDS) {
-        return stored.trim();
-      }
-      if (tokenExpiry === 0) {
-        // No expiry stored (old secure_store or missing _expiry key) – use stored token
-        return stored.trim();
-      }
+      if (tokenExpiry > now + EXPIRY_BUFFER_SECONDS) return stored.trim();
+      if (tokenExpiry === 0) return stored.trim();
     }
     const token = await invoke<string>('get_databricks_token');
     if (!token?.trim()) {
@@ -74,7 +92,7 @@ export async function getValidDatabricksToken(): Promise<string> {
   } catch (error) {
     if (error instanceof DatabricksAuthError) throw error;
     throw new DatabricksAuthError(
-      'Failed to obtain Databricks token. Please ensure Azure CLI is authenticated: az login'
+      'Failed to obtain Databricks token. Sign in via Azure CLI (az login) or select a Databricks CLI profile in Settings.'
     );
   }
 }

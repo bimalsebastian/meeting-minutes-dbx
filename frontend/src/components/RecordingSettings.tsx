@@ -146,8 +146,8 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   if (loading) {
     return (
       <div className="animate-pulse">
-        <div className="h-4 bg-gray-200 rounded w-1/4 mb-4"></div>
-        <div className="h-8 bg-gray-200 rounded mb-4"></div>
+        <div className="h-4 bg-[var(--panel-elevated)] rounded w-1/4 mb-4"></div>
+        <div className="h-8 bg-[var(--panel-elevated)] rounded mb-4"></div>
       </div>
     );
   }
@@ -156,16 +156,16 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-semibold mb-4">Recording Settings</h3>
-        <p className="text-sm text-gray-600 mb-6">
+        <p className="text-sm text-[var(--text-secondary)] mb-6">
           Configure how your audio recordings are saved during meetings.
         </p>
       </div>
 
       {/* Auto Save Toggle */}
-      <div className="flex items-center justify-between p-4 border rounded-lg">
+      <div className="flex items-center justify-between p-4 rounded-lg" style={{ border: '1px solid var(--separator)' }}>
         <div className="flex-1">
-          <div className="font-medium">Save Audio Recordings</div>
-          <div className="text-sm text-gray-600">
+          <div className="font-medium" style={{ color: 'var(--text-primary)' }}>Save Audio Recordings</div>
+          <div className="text-sm text-[var(--text-secondary)]">
             Automatically save audio files when recording stops
           </div>
         </div>
@@ -179,25 +179,25 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {/* Folder Location - Only shown when auto_save is enabled */}
       {preferences.auto_save && (
         <div className="space-y-4">
-          <div className="p-4 border rounded-lg bg-gray-50">
+          <div className="p-4 border rounded-lg bg-[var(--panel-elevated)]">
             <div className="font-medium mb-2">Save Location</div>
-            <div className="text-sm text-gray-600 mb-3 break-all">
+            <div className="text-sm text-[var(--text-secondary)] mb-3 break-all">
               {preferences.save_folder || 'Default folder'}
             </div>
             <button
               onClick={handleOpenFolder}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+              className="flex items-center gap-2 px-3 py-2 text-sm border border-[var(--separator)] rounded-md hover:bg-gray-50 transition-colors"
             >
               <FolderOpen className="w-4 h-4" />
               Open Folder
             </button>
           </div>
 
-          <div className="p-4 border rounded-lg bg-blue-50">
-            <div className="text-sm text-blue-800">
+          <div className="p-4 rounded-lg" style={{ background: 'rgba(0,122,255,0.08)', border: '1px solid rgba(0,122,255,0.2)' }}>
+            <div className="text-sm" style={{ color: 'var(--accent-hex)' }}>
               <strong>File Format:</strong> {preferences.file_format.toUpperCase()} files
             </div>
-            <div className="text-xs text-blue-600 mt-1">
+            <div className="text-xs mt-1" style={{ color: 'var(--accent-hex)', opacity: 0.8 }}>
               Recordings are saved with timestamp: recording_YYYYMMDD_HHMMSS.{preferences.file_format}
             </div>
           </div>
@@ -206,18 +206,18 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
       {/* Info when auto_save is disabled */}
       {!preferences.auto_save && (
-        <div className="p-4 border rounded-lg bg-yellow-50">
-          <div className="text-sm text-yellow-800">
+        <div className="p-4 rounded-lg" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
+          <div className="text-sm" style={{ color: '#D97706' }}>
             Audio recording is disabled. Enable "Save Audio Recordings" to automatically save your meeting audio.
           </div>
         </div>
       )}
 
       {/* Recording Notification Toggle */}
-      <div className="flex items-center justify-between p-4 border rounded-lg">
+      <div className="flex items-center justify-between p-4 rounded-lg" style={{ border: '1px solid var(--separator)' }}>
         <div className="flex-1">
-          <div className="font-medium">Recording Start Notification</div>
-          <div className="text-sm text-gray-600">
+          <div className="font-medium" style={{ color: 'var(--text-primary)' }}>Recording Start Notification</div>
+          <div className="text-sm text-[var(--text-secondary)]">
             Show reminder to inform participants when recording starts
           </div>
         </div>
@@ -230,12 +230,12 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {/* Device Preferences */}
       <div className="space-y-4">
         <div className="border-t pt-6">
-          <h4 className="text-base font-medium text-gray-900 mb-4">Default Audio Devices</h4>
-          <p className="text-sm text-gray-600 mb-4">
+          <h4 className="text-base font-medium text-[var(--text-primary)] mb-4">Default Audio Devices</h4>
+          <p className="text-sm text-[var(--text-secondary)] mb-4">
             Set your preferred microphone and system audio devices for recording. These will be automatically selected when starting new recordings.
           </p>
 
-          <div className="border rounded-lg p-4 bg-gray-50">
+          <div className="border rounded-lg p-4 bg-[var(--panel-elevated)]">
             <DeviceSelection
               selectedDevices={{
                 micDevice: preferences.preferred_mic_device,

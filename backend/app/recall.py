@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -236,12 +236,15 @@ async def recall_polling_loop(db):
             if not events:
                 continue
 
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             for event in events:
-                start_str = event.get('start', '').rstrip('Z')
+                start_str = event.get('start', '')
                 try:
                     event_start = datetime.fromisoformat(start_str)
+                    # Make timezone-aware if naive (assume UTC)
+                    if event_start.tzinfo is None:
+                        event_start = event_start.replace(tzinfo=timezone.utc)
                 except ValueError:
                     continue
 
@@ -286,6 +289,14 @@ async def recall_polling_loop(db):
                 )
 
                 logger.info(f"Recall: saved brief for event {event_id} ({event.get('title')})")
+                try:
+                    from main import _telemetry
+                    import asyncio as _asyncio
+                    _asyncio.create_task(_telemetry.capture("recall_brief_shown", {
+                        "attendee_count": len(attendees),
+                    }))
+                except Exception:
+                    pass
 
         except Exception as e:
             logger.error(f"Recall polling loop error: {e}", exc_info=True)

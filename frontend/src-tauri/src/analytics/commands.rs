@@ -8,17 +8,8 @@ static ANALYTICS_CLIENT: std::sync::Mutex<Option<Arc<AnalyticsClient>>> = std::s
 
 #[command]
 pub async fn init_analytics() -> Result<(), String> {
-    let config = AnalyticsConfig {
-        api_key: "phc_cohhHPgfQfnNWl33THRRpCftuRtWx2k5svtKrkpFb04".to_string(),
-        host: Some("https://us.i.posthog.com".to_string()),
-        enabled: true,
-    };
-    
-    let client = Arc::new(AnalyticsClient::new(config).await);
-    
-    let mut guard = ANALYTICS_CLIENT.lock().unwrap();
-    *guard = Some(client);
-    
+    // PostHog analytics disabled — using custom Google Drive / HTTP telemetry instead.
+    // Leaving the client as None causes all track_* commands to silently no-op.
     Ok(())
 }
 
