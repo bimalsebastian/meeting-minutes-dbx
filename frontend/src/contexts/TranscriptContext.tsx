@@ -501,7 +501,25 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
       addedAt: now.getTime(),
     };
     setUserNotes(prev => [...prev, note]);
-  }, []);
+
+    // Persist using the Rust UUID (same ID the summary screen uses to fetch)
+    // Falls back to the JS meeting ID if the Rust command is unavailable
+    const persist = async () => {
+      let meetingId = currentMeetingId;
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const rustId = await invoke<string | null>('get_current_meeting_id');
+        if (rustId) meetingId = rustId;
+      } catch { /* non-Tauri env */ }
+      if (!meetingId) return;
+      fetch(`http://localhost:5167/api/meetings/${meetingId}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: note.id, text: note.text, wallClockTime: note.wallClockTime }),
+      }).catch(() => {});
+    };
+    persist();
+  }, [currentMeetingId]);
 
   const clearUserNotes = useCallback(() => {
     setUserNotes([]);

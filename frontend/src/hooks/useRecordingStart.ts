@@ -108,19 +108,14 @@ export function useRecordingStart(
 
       console.log('Parakeet ready - setting up meeting title and state');
 
-      // Try to pre-populate title from active calendar event
+      // Try to pre-populate title from a matching calendar event (±5 min window)
       let calendarTitle: string | null = null;
       try {
-        const calRes = await fetch('http://localhost:5167/api/calendar/upcoming');
+        const calRes = await fetch('http://localhost:5167/api/calendar/match-recording');
         if (calRes.ok) {
           const calData = await calRes.json();
-          const now = new Date();
-          const activeEvent = calData.events?.find(
-            (e: { title: string; start: string; end: string }) =>
-              new Date(e.start) <= now && now < new Date(e.end)
-          );
-          if (activeEvent?.title) {
-            calendarTitle = activeEvent.title;
+          if (calData.matched && calData.formatted_title) {
+            calendarTitle = calData.formatted_title;
             console.log('[RecordingStart] Pre-populated title from calendar:', calendarTitle);
           }
         }

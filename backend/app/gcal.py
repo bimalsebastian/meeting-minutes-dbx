@@ -183,6 +183,114 @@ async def calendar_upcoming():
     return {"connected": connected, "events": events}
 
 
+def _format_event_title(event: dict) -> str:
+    """Format an event as 'Title\nDayName, Month Day·H:MM – H:MMam/pm'."""
+    title = event.get('title', 'Untitled')
+    try:
+        start_dt = dateutil_parser.isoparse(event['start']).astimezone()
+        end_dt = dateutil_parser.isoparse(event['end']).astimezone()
+
+        def fmt_time(dt: datetime, show_period: bool) -> str:
+            h = dt.hour % 12 or 12
+            m = dt.minute
+            t = f"{h}:{m:02d}" if m else str(h)
+            return t + ('am' if dt.hour < 12 else 'pm') if show_period else t
+
+        same_period = (start_dt.hour < 12) == (end_dt.hour < 12)
+        start_str = fmt_time(start_dt, show_period=not same_period)
+        end_str = fmt_time(end_dt, show_period=True)
+
+        day = start_dt.strftime('%A')
+        month_day = start_dt.strftime('%B %-d')
+        return f"{title}\n{day}, {month_day}·{start_str} – {end_str}"
+    except Exception:
+        return title
+
+
+@router.get("/api/calendar/match-recording")
+async def calendar_match_recording():
+    """
+    Return the best-matching calendar event for a recording starting now.
+
+    Matches events whose window overlaps ±5 minutes of the current time:
+    - event already started (up to 5 min ago) and not yet ended
+    - event starts within the next 5 minutes
+    Returns {matched: bool, formatted_title: str | null, event_id: str | null}
+    """
+    try:
+        if not await _db.has_calendar_token():
+            return {"matched": False, "formatted_title": None, "event_id": None}
+
+        token_json = await _db.get_calendar_token()
+        if not token_json:
+            return {"matched": False, "formatted_title": None, "event_id": None}
+
+        creds = Credentials.from_authorized_user_info(json.loads(token_json))
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            await _db.save_calendar_token(creds.to_json())
+
+        service = build('calendar', 'v3', credentials=creds)
+        now = datetime.now(timezone.utc)
+        window_start = (now - timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
+        window_end   = (now + timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
+
+        result = service.events().list(
+            calendarId='primary',
+            maxResults=10,
+            orderBy='startTime',
+            singleEvents=True,
+            timeMin=window_start,
+            timeMax=window_end,
+        ).execute()
+
+        candidates = []
+        for item in result.get('items', []):
+            start_raw = item.get('start', {}).get('dateTime') or item.get('start', {}).get('date', '')
+            end_raw   = item.get('end',   {}).get('dateTime') or item.get('end',   {}).get('date', '')
+            if not start_raw:
+                continue
+            try:
+                start_dt = dateutil_parser.isoparse(start_raw)
+                end_dt   = dateutil_parser.isoparse(end_raw)
+                if start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=timezone.utc)
+                if end_dt.tzinfo is None:
+                    end_dt = end_dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+
+            # Skip all-day events (no time component)
+            if 'T' not in start_raw:
+                continue
+
+            event = {
+                'event_id': item['id'],
+                'title': item.get('summary', 'Untitled'),
+                'start': start_dt.astimezone(timezone.utc).isoformat(),
+                'end':   end_dt.astimezone(timezone.utc).isoformat(),
+            }
+            # Prefer events already in progress; secondary sort by proximity to now
+            delta = abs((start_dt - now).total_seconds())
+            in_progress = start_dt <= now <= end_dt
+            candidates.append((0 if in_progress else 1, delta, event))
+
+        if not candidates:
+            return {"matched": False, "formatted_title": None, "event_id": None}
+
+        candidates.sort(key=lambda x: (x[0], x[1]))
+        best = candidates[0][2]
+        return {
+            "matched": True,
+            "formatted_title": best['title'],
+            "event_id": best['event_id'],
+        }
+
+    except Exception as e:
+        logger.warning(f"[gcal] match-recording failed: {e}")
+        return {"matched": False, "formatted_title": None, "event_id": None}
+
+
 @router.get("/api/calendar/status")
 async def calendar_status():
     """Return current polling/split state for the frontend banner."""

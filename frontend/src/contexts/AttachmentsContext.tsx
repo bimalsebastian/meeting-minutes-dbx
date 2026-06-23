@@ -16,12 +16,14 @@ interface AttachmentsContextType {
   attachments: Attachment[];
   loadForMeeting: (meetingId: string) => Promise<void>;
   clearAttachments: () => void;
+  removeAttachment: (attachmentId: string) => void;
 }
 
 const AttachmentsContext = createContext<AttachmentsContextType>({
   attachments: [],
   loadForMeeting: async () => {},
   clearAttachments: () => {},
+  removeAttachment: () => {},
 });
 
 export const useAttachments = () => useContext(AttachmentsContext);
@@ -86,8 +88,12 @@ export function AttachmentsProvider({ children }: { children: ReactNode }) {
     setAttachments([]);
   }, []);
 
+  const removeAttachment = useCallback((attachmentId: string) => {
+    setAttachments(prev => prev.filter(a => a.attachment_id !== attachmentId));
+  }, []);
+
   return (
-    <AttachmentsContext.Provider value={{ attachments, loadForMeeting, clearAttachments }}>
+    <AttachmentsContext.Provider value={{ attachments, loadForMeeting, clearAttachments, removeAttachment }}>
       {children}
     </AttachmentsContext.Provider>
   );

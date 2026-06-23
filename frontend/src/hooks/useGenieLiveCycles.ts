@@ -14,14 +14,16 @@ export function useGenieLiveCycles(
   const cycleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const firstRunTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPausedRef = useRef(isPaused);
+  const intervalMinutesRef = useRef(intervalMinutes);
 
-  // Keep ref in sync so fireCycle always sees latest pause state without re-registering timers
+  // Keep refs in sync on every render without triggering effect re-runs
   isPausedRef.current = isPaused;
+  intervalMinutesRef.current = intervalMinutes;
 
   const fireCycle = async () => {
     const meetingId = meetingIdRef.current;
     if (!meetingId) return;
-    if (isPausedRef.current) return; // don't fire while paused
+    if (isPausedRef.current) return;
 
     const transcriptChunk = getRecentTranscriptText();
     if (!transcriptChunk.trim()) return;
@@ -39,6 +41,9 @@ export function useGenieLiveCycles(
     }).catch(() => {});
   };
 
+  // Effect 1: manage timer lifecycle tied to recording state only.
+  // intervalMinutes is intentionally NOT a dep — use intervalMinutesRef so
+  // a settings change never tears down and re-creates the timers mid-recording.
   useEffect(() => {
     const clear = () => {
       if (cycleTimerRef.current) clearInterval(cycleTimerRef.current);
@@ -64,11 +69,22 @@ export function useGenieLiveCycles(
 
         cycleTimerRef.current = setInterval(() => {
           fireCycle();
-        }, intervalMinutes * 60_000);
+        }, intervalMinutesRef.current * 60_000);
       })
       .catch(() => {});
 
     return clear;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRecording, intervalMinutes]);
+  }, [isRecording]);
+
+  // Effect 2: when interval changes mid-recording, reschedule the repeating
+  // timer without touching the first-run timeout or the meeting ID.
+  useEffect(() => {
+    if (!isRecording || !cycleTimerRef.current) return;
+    clearInterval(cycleTimerRef.current);
+    cycleTimerRef.current = setInterval(() => {
+      fireCycle();
+    }, intervalMinutes * 60_000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intervalMinutes]);
 }

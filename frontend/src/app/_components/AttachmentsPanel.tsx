@@ -45,7 +45,7 @@ function Chevron({ open }: { open: boolean }) {
 }
 
 export function AttachmentsPanel({ meetingId, isRecording, width }: AttachmentsPanelProps) {
-  const { attachments, loadForMeeting } = useAttachments();
+  const { attachments, loadForMeeting, removeAttachment } = useAttachments();
   const [lightbox, setLightbox] = useState<Attachment | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
 
@@ -67,12 +67,13 @@ export function AttachmentsPanel({ meetingId, isRecording, width }: AttachmentsP
   }, [lightbox]);
 
   const handleDelete = async (attachmentId: string, attMeetingId: string) => {
+    removeAttachment(attachmentId); // optimistic — remove from UI immediately
     try {
       await fetch(
         `http://localhost:5167/api/meetings/${attMeetingId}/attachments/${attachmentId}`,
         { method: 'DELETE' }
       );
-    } catch { /* backend not running */ }
+    } catch { /* backend not running — UI already updated */ }
   };
 
   // Two visual modes:

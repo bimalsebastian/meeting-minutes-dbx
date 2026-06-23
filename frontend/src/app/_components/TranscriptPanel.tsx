@@ -68,7 +68,7 @@ export function TranscriptPanel({
   if (stripMode) {
     return (
       <div className="flex-1 min-w-0 flex flex-col bg-[var(--panel-bg)] overflow-hidden h-full">
-        {/* Transcript scroll — fills most of strip */}
+        {/* Transcript + notes scroll — fills most of strip */}
         <div ref={transcriptContainerRef} className="flex-1 overflow-y-auto min-h-0 px-3 py-2">
           <VirtualizedTranscriptView
             segments={segments}
@@ -81,6 +81,27 @@ export function TranscriptPanel({
             hideStatusBar={true}
             compact={true}
           />
+          {/* User notes shown below transcript in strip mode */}
+          {userNotes.length > 0 && (
+            <div className="flex flex-col gap-1 mt-1">
+              {userNotes.map(note => (
+                <div
+                  key={note.id}
+                  className="flex items-start gap-1.5 rounded-lg px-2 py-1"
+                  style={{
+                    background: 'var(--note-bg)',
+                    border: '1px solid color-mix(in srgb, var(--note-border) 35%, transparent)',
+                  }}
+                >
+                  <span style={{ fontSize: 11, flexShrink: 0 }}>📝</span>
+                  <span className="font-mono flex-shrink-0" style={{ fontSize: 10, color: 'var(--text-tertiary)', paddingTop: 1 }}>
+                    {note.wallClockTime}
+                  </span>
+                  <p style={{ fontSize: 11, lineHeight: 1.4, color: 'var(--text-primary)', flex: 1 }}>{note.text}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Compact single-row note input */}

@@ -62,6 +62,7 @@ function SuggestionCard({ hint, index, isExpanded, onToggle }: {
     <div
       className="rounded-xl overflow-hidden transition-all"
       style={{
+        gridColumn: isExpanded ? '1 / -1' : 'auto',
         background: 'var(--panel-bg)',
         border: '1px solid var(--db-line)',
         boxShadow: isExpanded
@@ -73,7 +74,7 @@ function SuggestionCard({ hint, index, isExpanded, onToggle }: {
       <button
         onClick={onToggle}
         className="flex gap-3 w-full text-left"
-        style={{ all: 'unset', boxSizing: 'border-box', cursor: 'pointer', display: 'flex', gap: 12, padding: '13px 15px', alignItems: 'flex-start' }}
+        style={{ all: 'unset', boxSizing: 'border-box', cursor: 'pointer', display: 'flex', gap: 10, padding: '11px 12px', alignItems: 'flex-start' }}
       >
         {/* Order badge */}
         <span style={{
@@ -84,66 +85,60 @@ function SuggestionCard({ hint, index, isExpanded, onToggle }: {
         }}>{index}</span>
         <span style={{ flex: 1, minWidth: 0 }}>
           {/* Topic + timestamp row */}
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <GenieMark size={13} />
-            <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--db-lava)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+            <GenieMark size={12} />
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--db-lava)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {hint.extracted_query ?? `Check ${hint.cycle_number}`}
             </span>
             {hint.timestamp > 0 && (
-              <span style={{ fontSize: 10.5, fontFamily: 'ui-monospace, monospace', color: 'var(--db-ink-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              <span style={{ fontSize: 10, fontFamily: 'ui-monospace, monospace', color: 'var(--db-ink-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
                 {formatSecs(hint.timestamp)}
               </span>
             )}
           </span>
-          {/* Headline */}
+          {/* Collapsed: 2-line clamped headline + detail count */}
           {!isExpanded && (
-            <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, lineHeight: 1.4, color: 'var(--db-navy)' }}>
-              {/* Show first sentence of answer or query */}
-              {hint.genie_raw_answer
-                ? hint.genie_raw_answer.split('\n').find(l => l.trim() && !l.startsWith('#'))?.slice(0, 120) ?? hint.extracted_query
-                : hint.extracted_query}
-            </span>
+            <>
+              <span style={{
+                display: '-webkit-box', WebkitBoxOrient: 'vertical' as const, WebkitLineClamp: 2,
+                overflow: 'hidden', fontSize: 13, fontWeight: 600, lineHeight: 1.4, color: 'var(--db-navy)',
+              }}>
+                {hint.genie_raw_answer
+                  ? hint.genie_raw_answer.split('\n').find(l => l.trim() && !l.startsWith('#')) ?? hint.extracted_query
+                  : hint.extracted_query}
+              </span>
+              {detailCount && (
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--db-ink-muted)', marginTop: 3 }}>{detailCount}</span>
+              )}
+            </>
           )}
         </span>
         <span style={{ flexShrink: 0, marginTop: 2, color: 'var(--db-ink-muted)', display: 'inline-flex', transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
         </span>
       </button>
 
       {/* Collapsed: primary action button */}
       {!isExpanded && primaryLink && (
-        <div style={{ padding: '0 15px 13px 51px' }}>
+        <div style={{ padding: '0 10px 11px 10px' }}>
           <button
             onClick={() => openUrl(primaryLink.url)}
             style={{
               all: 'unset', boxSizing: 'border-box', cursor: 'pointer', width: '100%',
-              display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px',
+              display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
               background: 'var(--db-lava-tint)', border: '1px solid rgba(255,54,33,0.18)',
               borderRadius: 9, transition: 'background .13s',
             }}
             onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(255,54,33,0.18)'}
             onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'var(--db-lava-tint)'}
           >
-            <span style={{ flexShrink: 0, width: 26, height: 26, borderRadius: '50%', background: 'var(--db-lava)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5l11 7-11 7V5z"/></svg>
+            <span style={{ flexShrink: 0, width: 24, height: 24, borderRadius: '50%', background: 'var(--db-lava)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5l11 7-11 7V5z"/></svg>
             </span>
             <span style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--db-navy)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{primaryLink.text}</span>
-              {primaryLink.description && (
-                <span style={{ display: 'block', fontSize: 11.5, color: 'var(--db-ink-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{primaryLink.description}</span>
-              )}
+              <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--db-navy)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{primaryLink.text}</span>
             </span>
           </button>
-          {/* Expand toggle */}
-          {detailCount && (
-            <button
-              onClick={onToggle}
-              style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, marginTop: 9, fontSize: 12, color: 'var(--db-ink-muted)' }}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
-              {detailCount}
-            </button>
-          )}
         </div>
       )}
 
@@ -373,7 +368,7 @@ export function GenieSuggestionsTab({ meetingId }: { meetingId: string }) {
               </p>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
               {hints.map((hint, i) => (
                 <SuggestionCard key={hint.id} hint={hint} index={i + 1}
                   isExpanded={expandedId === hint.id}
@@ -402,7 +397,7 @@ export function GenieSuggestionsTab({ meetingId }: { meetingId: string }) {
               {chatMessages.map(msg => (
                 msg.role === 'user' ? (
                   <div key={msg.id} style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <div style={{ maxWidth: '84%', background: 'var(--db-navy)', color: '#fff', borderRadius: '14px 14px 4px 14px', padding: '10px 14px', fontSize: 13.5, lineHeight: 1.5 }}>
+                    <div style={{ maxWidth: '84%', background: 'var(--db-lava)', color: '#fff', borderRadius: '14px 14px 4px 14px', padding: '10px 14px', fontSize: 13.5, lineHeight: 1.5 }}>
                       {msg.content}
                     </div>
                   </div>
@@ -436,7 +431,7 @@ export function GenieSuggestionsTab({ meetingId }: { meetingId: string }) {
           )}
 
           {chatError && (
-            <div style={{ marginTop: 12, padding: '9px 12px', borderRadius: 9, background: 'rgba(255,54,33,0.08)', border: '1px solid rgba(255,54,33,0.2)', fontSize: 12.5, color: '#C02810' }}>
+            <div style={{ marginTop: 12, padding: '9px 12px', borderRadius: 9, background: 'var(--db-lava-tint)', border: '1px solid rgba(255,54,33,0.25)', fontSize: 12.5, color: 'var(--db-lava)' }}>
               {chatError}
             </div>
           )}

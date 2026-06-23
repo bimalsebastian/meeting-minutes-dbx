@@ -346,6 +346,8 @@ function RightTabbedPanel({ meeting, meetingData, summaryGeneration, copyOperati
         {tab === 'transcript' && (
           <div className="flex-1 overflow-hidden flex flex-col" style={{ background: 'var(--panel-bg)' }}>
             <TranscriptPanel
+              meetingId={meeting.id}
+              meetingCreatedAt={meeting.created_at}
               transcripts={meetingData.transcripts}
               customPrompt={customPrompt}
               onPromptChange={() => {}}
